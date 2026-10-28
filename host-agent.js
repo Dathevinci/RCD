@@ -1,6 +1,6 @@
 /**
- * RemoteAssist Local Host Agent (host-agent.js)
- * ---------------------------------------------
+ * Prashnaa Local Host Agent (host-agent.js)
+ * -----------------------------------------
  * Runs locally on the Host laptop (127.0.0.1:3847 ONLY) to bridge approved
  * WebRTC remote mouse/keyboard events from the Host's browser UI to the OS.
  *
@@ -298,7 +298,7 @@ if (process.stdin.isTTY) {
     const key = chunk.toString();
     if (key === '\u0003') {
       // Ctrl+C
-      console.log('\n🛑 Stopping RemoteAssist Local Host Agent...');
+      console.log('\n🛑 Stopping Prashnaa Local Host Agent...');
       process.exit(0);
     }
     if (key === ' ') {
@@ -314,7 +314,7 @@ if (process.stdin.isTTY) {
 }
 
 console.log('\n============================================================');
-console.log('  🖱️  RemoteAssist — Local Host Input Agent');
+console.log('  🖱️  Prashnaa — Local Host Input Agent');
 console.log('============================================================');
 console.log(`  Listening on: ws://127.0.0.1:${AGENT_PORT} (Localhost Only)`);
 console.log('  Safety Controls:');

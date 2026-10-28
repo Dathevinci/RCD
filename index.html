@@ -174,6 +174,9 @@
               <button type="button" class="btn btn-primary btn-sm" id="openExplorerBtn" title="Open Windows File Explorer on partner's laptop">
                 📁 Explorer
               </button>
+              <button type="button" class="btn btn-secondary btn-sm" id="startMenuBtn" title="Open Windows Start Menu on partner's laptop">
+                🪟 Start
+              </button>
             </div>
 
             <div class="toolbar-group">
@@ -200,6 +203,9 @@
                 <input type="checkbox" id="captureKeyboardToggle" checked />
                 <span>⌨️ Keys</span>
               </label>
+              <button type="button" class="btn btn-secondary btn-sm" id="toolbarChatBtn" title="Toggle Live Chat Sidebar">
+                💬 Chat
+              </button>
               <button type="button" class="btn btn-secondary btn-sm" id="refreshStreamBtn" title="Reconnect & refresh video stream without ending session">
                 🔄 Refresh
               </button>
@@ -240,7 +246,7 @@
             <button type="button" class="btn btn-primary btn-sm" id="reconnectNowBtn">Reconnect Now</button>
           </div>
 
-          <video id="remoteScreenVideo" autoplay playsinline></video>
+          <video id="remoteScreenVideo" autoplay muted playsinline></video>
           <div class="laser-layer" id="remoteLaserLayer"></div>
           <div class="stage-placeholder" id="remoteVideoPlaceholder">
             <div class="spinner"></div>
@@ -309,7 +315,7 @@
               To let your partner click, open files, and type without CMD, download and open the Prashnaa Helper v4 below:
             </p>
             <a href="RemoteAssist-Helper.exe" download="RemoteAssist-Helper.exe" class="btn btn-secondary btn-sm" id="downloadHelperBtn">
-              ⬇️ Download Prashnaa Mouse Helper v4 (16 KB — No CMD)
+              ⬇️ Download Prashnaa Mouse Helper v4 (17 KB — No CMD)
             </a>
           </div>
 

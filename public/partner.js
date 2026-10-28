@@ -77,6 +77,7 @@
   const partnerChatMessages = document.getElementById('partnerChatMessages');
   const partnerChatForm = document.getElementById('partnerChatForm');
   const partnerChatInput = document.getElementById('partnerChatInput');
+  const partnerResyncBtn = document.getElementById('partnerResyncBtn');
 
   let sessionState = {
     sessionId: getSavedOrCreateDigits('prashnaa_partner_id', 6),
@@ -84,12 +85,15 @@
     allowControl: true,
     connected: false,
     helperName: 'Your Partner',
-    lastControllerPeerId: inviteRoomCode ? PEER_PREFIX_CTRL + inviteRoomCode.replace(/\D/g, '') : null
+    lastControllerPeerId: inviteRoomCode ? PEER_PREFIX_CTRL + inviteRoomCode.replace(/\D/g, '') : null,
+    lastRemoteActivityAt: 0
   };
 
   let peer = null;
   let activeDataConn = null;
   let pendingDataConn = null;
+  let pendingReconnectConn = null;
+  let pendingReconnectStartedAt = 0;
   let activeMediaCall = null;
   let localStream = null;
 
@@ -97,6 +101,64 @@
   let helperFailStreak = 0;
   let explicitlyStopped = false;
   let partnerReconnectTimer = null;
+
+  // Background tab anti-throttling resources (when Partner's browser is minimized via Win+D)
+  let wakeLockSentinel = null;
+  let keepAwakeAudioCtx = null;
+  let keepAwakeLockRelease = null;
+
+  async function acquireTabKeepAwake() {
+    try {
+      if ('wakeLock' in navigator && !wakeLockSentinel) {
+        wakeLockSentinel = await navigator.wakeLock.request('screen');
+        wakeLockSentinel.addEventListener('release', () => {
+          wakeLockSentinel = null;
+        });
+      }
+    } catch {}
+
+    try {
+      if ('locks' in navigator && !keepAwakeLockRelease) {
+        navigator.locks.request('prashnaa_partner_active_share', () => {
+          return new Promise((resolve) => {
+            keepAwakeLockRelease = resolve;
+          });
+        }).catch(() => {});
+      }
+    } catch {}
+
+    try {
+      if (!keepAwakeAudioCtx) {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (AudioCtx) {
+          keepAwakeAudioCtx = new AudioCtx();
+          const osc = keepAwakeAudioCtx.createOscillator();
+          const gain = keepAwakeAudioCtx.createGain();
+          gain.gain.value = 0.00001;
+          osc.connect(gain);
+          gain.connect(keepAwakeAudioCtx.destination);
+          osc.start();
+        }
+      } else if (keepAwakeAudioCtx.state === 'suspended') {
+        keepAwakeAudioCtx.resume().catch(() => {});
+      }
+    } catch {}
+  }
+
+  function releaseTabKeepAwake() {
+    if (wakeLockSentinel) {
+      try { wakeLockSentinel.release(); } catch {}
+      wakeLockSentinel = null;
+    }
+    if (keepAwakeLockRelease) {
+      try { keepAwakeLockRelease(); } catch {}
+      keepAwakeLockRelease = null;
+    }
+    if (keepAwakeAudioCtx) {
+      try { keepAwakeAudioCtx.close(); } catch {}
+      keepAwakeAudioCtx = null;
+    }
+  }
 
   function escapeHtml(str) {
     return String(str)
@@ -138,75 +200,129 @@
     });
   }
 
-  // ==================== COALESCED LOCAL HELPER BRIDGE (127.0.0.1:3847) ====================
-  let moveInFlight = false;
+  // ==================== UNIFIED SINGLE-FLIGHT LOCAL HELPER BRIDGE (127.0.0.1:3847) ====================
+  let helperRequestInFlight = false;
   let pendingMoveEvent = null;
+  let pendingScrollDeltaY = 0;
+  const helperActionQueue = [];
 
   function sendToLocalHelper(ev) {
-    if (!sessionState.allowControl || !helperExeActive) return;
+    if (!sessionState.allowControl || !helperExeActive || !ev) return;
 
     if (ev.type === 'pointer-move') {
       pendingMoveEvent = ev;
-      if (!moveInFlight) {
-        flushPendingMove();
-      }
+      pumpLocalHelperQueue();
       return;
     }
 
-    pendingMoveEvent = null;
-    fetch('http://127.0.0.1:3847/input', {
-      method: 'POST',
-      body: JSON.stringify(ev),
-      keepalive: true
-    }).catch(() => {});
+    if (ev.type === 'mouse-scroll') {
+      pendingScrollDeltaY += Number(ev.deltaY) || 0;
+      pumpLocalHelperQueue();
+      return;
+    }
+
+    if (
+      ev.type === 'mouse-down' ||
+      ev.type === 'mouse-up' ||
+      ev.type === 'mouse-click' ||
+      ev.type === 'mouse-dblclick'
+    ) {
+      pendingMoveEvent = null;
+    }
+
+    if (helperActionQueue.length < 40) {
+      helperActionQueue.push(ev);
+    }
+    pumpLocalHelperQueue();
   }
 
-  function flushPendingMove() {
-    if (!pendingMoveEvent) {
-      moveInFlight = false;
-      return;
+  function pumpLocalHelperQueue() {
+    if (helperRequestInFlight) return;
+
+    let nextPayload = null;
+    if (helperActionQueue.length > 0) {
+      nextPayload = helperActionQueue.shift();
+    } else if (pendingScrollDeltaY !== 0) {
+      nextPayload = { type: 'mouse-scroll', deltaY: pendingScrollDeltaY };
+      pendingScrollDeltaY = 0;
+    } else if (pendingMoveEvent) {
+      nextPayload = pendingMoveEvent;
+      pendingMoveEvent = null;
     }
-    const ev = pendingMoveEvent;
-    pendingMoveEvent = null;
-    moveInFlight = true;
+
+    if (!nextPayload) return;
+    helperRequestInFlight = true;
+
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 1200);
 
     fetch('http://127.0.0.1:3847/input', {
       method: 'POST',
-      body: JSON.stringify(ev)
+      body: JSON.stringify(nextPayload),
+      signal: ctrl.signal
     })
+      .then((res) => {
+        if (res && res.ok) {
+          helperFailStreak = 0;
+        }
+      })
       .catch(() => {})
       .finally(() => {
-        if (pendingMoveEvent) {
-          flushPendingMove();
-        } else {
-          moveInFlight = false;
+        clearTimeout(timer);
+        helperRequestInFlight = false;
+        if (helperActionQueue.length > 0 || pendingScrollDeltaY !== 0 || pendingMoveEvent) {
+          pumpLocalHelperQueue();
         }
       });
+  }
+
+  function updateMissingHelperWarningVisibility() {
+    if (!activeMissingHelperBtn) return;
+    if (!helperExeActive && sessionState.allowControl) {
+      activeMissingHelperBtn.classList.remove('hidden');
+    } else {
+      activeMissingHelperBtn.classList.add('hidden');
+    }
   }
 
   async function checkLocalHelperExe() {
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 1400);
+      const timer = setTimeout(() => ctrl.abort(), 1500);
       const res = await fetch('http://127.0.0.1:3847/status', { signal: ctrl.signal });
       clearTimeout(timer);
       const data = await res.json();
       if (data && data.ok) {
         helperFailStreak = 0;
-        const changed = !helperExeActive;
-        helperExeActive = true;
-        if (step1Card) step1Card.classList.add('done');
-        partnerHelperDot.className = 'dot online';
-        partnerHelperBadge.textContent = '✅ Connected';
-        partnerHelperBadge.className = 'badge badge-shield';
-        partnerHelperTitle.textContent = 'Step 1 Complete: Prashnaa Helper Running!';
-        partnerHelperDesc.textContent = 'Awesome! Now click the green Step 2 button below to share your Entire Screen.';
-        if (partnerDownloadBtn) partnerDownloadBtn.classList.add('hidden');
-        if (activeMissingHelperBtn) activeMissingHelperBtn.classList.add('hidden');
+        const canControl = data.allowControl !== false;
+        const changed = helperExeActive !== canControl;
+        helperExeActive = canControl;
+
+        if (canControl) {
+          if (step1Card) step1Card.classList.add('done');
+          partnerHelperDot.className = 'dot online';
+          partnerHelperBadge.textContent = '✅ Connected';
+          partnerHelperBadge.className = 'badge badge-shield';
+          partnerHelperTitle.textContent = 'Step 1 Complete: Prashnaa Helper Running!';
+          partnerHelperDesc.textContent = 'Awesome! Now click the green Step 2 button below to share your Entire Screen.';
+          if (partnerDownloadBtn) partnerDownloadBtn.classList.add('hidden');
+        } else {
+          if (step1Card) step1Card.classList.remove('done');
+          partnerHelperDot.className = 'dot warning';
+          partnerHelperBadge.textContent = 'Paused in Helper';
+          partnerHelperBadge.className = 'badge badge-control';
+          partnerHelperTitle.textContent = 'Prashnaa Helper is Paused';
+          partnerHelperDesc.textContent = 'Check the "Allow Partner Full Mouse & Keyboard Control" box inside the Prashnaa Helper window.';
+        }
+
+        updateMissingHelperWarningVisibility();
+
         if (changed) {
           notifyControllerPermissions();
           if (sessionState.connected) {
-            activePartnerStatus.textContent = 'Full Control Active! Your partner can move your mouse and open files.';
+            activePartnerStatus.textContent = helperExeActive
+              ? 'Full Control Active! Your partner can move your mouse and open files.'
+              : 'View-Only Mode: Enable control in Prashnaa Helper for mouse & file access.';
           }
         }
         return;
@@ -225,7 +341,7 @@
     partnerHelperBadge.textContent = 'Required for Full Control';
     partnerHelperBadge.className = 'badge badge-control';
     if (partnerDownloadBtn) partnerDownloadBtn.classList.remove('hidden');
-    if (activeMissingHelperBtn) activeMissingHelperBtn.classList.remove('hidden');
+    updateMissingHelperWarningVisibility();
     if (changed) notifyControllerPermissions();
   }
 
@@ -251,7 +367,19 @@
     stepEl.classList.remove('hidden');
   }
 
+  function cancelPendingReconnectConn() {
+    if (pendingReconnectConn) {
+      pendingReconnectConn._replaced = true;
+      try { pendingReconnectConn.close(); } catch {}
+      pendingReconnectConn = null;
+      pendingReconnectStartedAt = 0;
+    }
+  }
+
   function initPeer() {
+    if (peer && !peer.destroyed) {
+      try { peer.destroy(); } catch {}
+    }
     peer = new Peer(PEER_PREFIX_HOST + sessionState.sessionId, PEER_CONFIG);
 
     peer.on('open', () => {
@@ -288,8 +416,18 @@
     });
 
     peer.on('connection', (conn) => {
+      // Cancel any outgoing reconnect attempt so we don't collide with Controller's incoming connection
+      cancelPendingReconnectConn();
+      if (partnerReconnectTimer) {
+        clearTimeout(partnerReconnectTimer);
+        partnerReconnectTimer = null;
+      }
+
+      conn._partnerDataBound = true;
       conn.on('data', (msg) => {
         if (!msg || typeof msg !== 'object') return;
+        sessionState.lastRemoteActivityAt = Date.now();
+
         if (msg.type === 'join-request') {
           const isValidPin = String(msg.pin || '').trim() === sessionState.pin;
           const isSameControllerReconnect =
@@ -303,8 +441,6 @@
             return;
           }
 
-          // If we already have an active screen share stream (e.g. reconnecting mid-session or already started),
-          // connect immediately without making the non-IT partner click Approve again!
           if (localStream && localStream.active) {
             sessionState.helperName = msg.controllerName || sessionState.helperName || 'Your Partner';
             attachPartnerActiveConnection(conn, 'request-approved');
@@ -324,6 +460,27 @@
 
   initPeer();
 
+  // Periodic watchdog to keep signaling alive and detect silent peer drops
+  setInterval(() => {
+    if (!peer || peer.destroyed) {
+      initPeer();
+    } else if (peer.disconnected) {
+      try { peer.reconnect(); } catch {}
+    }
+
+    if (
+      sessionState.connected &&
+      !explicitlyStopped &&
+      localStream &&
+      localStream.active &&
+      sessionState.lastRemoteActivityAt > 0 &&
+      Date.now() - sessionState.lastRemoteActivityAt > 16000
+    ) {
+      sessionState.lastRemoteActivityAt = Date.now();
+      handleUnexpectedPartnerDisconnect();
+    }
+  }, 3500);
+
   async function captureScreen() {
     if (localStream && localStream.active) return localStream;
     try {
@@ -337,6 +494,8 @@
       });
       localStream = stream;
       simplePreviewVideo.srcObject = stream;
+      acquireTabKeepAwake();
+
       const track = stream.getVideoTracks()[0];
       if (track) {
         const settings = track.getSettings ? track.getSettings() : {};
@@ -353,6 +512,46 @@
     }
   }
 
+  function startMediaCallToController(targetPeerId) {
+    if (!localStream || !localStream.active || !peer || !targetPeerId) return;
+    if (activeMediaCall) {
+      activeMediaCall._replaced = true;
+      try { activeMediaCall.close(); } catch {}
+    }
+    const call = peer.call(targetPeerId, localStream);
+    activeMediaCall = call;
+
+    if (call) {
+      setTimeout(() => {
+        const pc = call.peerConnection;
+        if (!pc) return;
+        let iceTimer = null;
+        pc.addEventListener('iceconnectionstatechange', () => {
+          if (call._replaced || explicitlyStopped || !localStream || !localStream.active) return;
+          const st = pc.iceConnectionState;
+          if (st === 'connected' || st === 'completed') {
+            if (iceTimer) {
+              clearTimeout(iceTimer);
+              iceTimer = null;
+            }
+          } else if (st === 'failed') {
+            if (activeDataConn && activeDataConn.open) {
+              startMediaCallToController(activeDataConn.peer);
+            }
+          } else if (st === 'disconnected') {
+            if (!iceTimer) {
+              iceTimer = setTimeout(() => {
+                if (!call._replaced && !explicitlyStopped && pc.iceConnectionState === 'disconnected' && activeDataConn && activeDataConn.open) {
+                  startMediaCallToController(activeDataConn.peer);
+                }
+              }, 4000);
+            }
+          }
+        });
+      }, 50);
+    }
+  }
+
   if (notEntireScreenWarningBtn) {
     notEntireScreenWarningBtn.addEventListener('click', async () => {
       if (localStream) {
@@ -360,17 +559,25 @@
         localStream = null;
       }
       const stream = await captureScreen();
-      if (stream && activeDataConn && peer) {
-        if (activeMediaCall) {
-          activeMediaCall._replaced = true;
-          try { activeMediaCall.close(); } catch {}
-        }
-        activeMediaCall = peer.call(activeDataConn.peer, stream);
+      if (stream && activeDataConn) {
+        startMediaCallToController(activeDataConn.peer);
+      }
+    });
+  }
+
+  if (partnerResyncBtn) {
+    partnerResyncBtn.addEventListener('click', () => {
+      if (activeDataConn && activeDataConn.peer) {
+        startMediaCallToController(activeDataConn.peer);
+      } else {
+        handleUnexpectedPartnerDisconnect();
       }
     });
   }
 
   function handleIncomingData(msg) {
+    sessionState.lastRemoteActivityAt = Date.now();
+
     if (msg.type === 'ping') {
       if (activeDataConn && activeDataConn.open) {
         try { activeDataConn.send({ type: 'pong', ts: msg.ts }); } catch {}
@@ -378,12 +585,8 @@
       return;
     }
     if (msg.type === 'request-stream-refresh') {
-      if (localStream && localStream.active && peer && activeDataConn) {
-        if (activeMediaCall) {
-          activeMediaCall._replaced = true;
-          try { activeMediaCall.close(); } catch {}
-        }
-        activeMediaCall = peer.call(activeDataConn.peer, localStream);
+      if (activeDataConn && activeDataConn.peer) {
+        startMediaCallToController(activeDataConn.peer);
       }
       return;
     }
@@ -404,6 +607,7 @@
   }
 
   function setActiveConnectedUI() {
+    cancelPendingReconnectConn();
     if (partnerReconnectTimer) {
       clearTimeout(partnerReconnectTimer);
       partnerReconnectTimer = null;
@@ -413,10 +617,12 @@
     activePartnerStatus.textContent = helperExeActive
       ? 'Full Control Active! Your partner can move your mouse and open files.'
       : 'Screen shared! Open "RemoteAssist-Helper.exe" below to enable full mouse control.';
+    updateMissingHelperWarningVisibility();
     showStep(stepActive);
   }
 
   function attachPartnerActiveConnection(conn, readyMessageType) {
+    if (!conn) return;
     if (activeDataConn && activeDataConn !== conn) {
       activeDataConn._replaced = true;
       try { activeDataConn.close(); } catch {}
@@ -426,8 +632,11 @@
     activeDataConn = conn;
     sessionState.connected = true;
     sessionState.lastControllerPeerId = conn.peer;
+    sessionState.lastRemoteActivityAt = Date.now();
 
     const onOpenSendAndCall = () => {
+      if (conn._replaced || explicitlyStopped) return;
+      sessionState.lastRemoteActivityAt = Date.now();
       setActiveConnectedUI();
       try {
         conn.send({
@@ -438,13 +647,7 @@
         });
       } catch {}
 
-      if (localStream && localStream.active && peer) {
-        if (activeMediaCall) {
-          activeMediaCall._replaced = true;
-          try { activeMediaCall.close(); } catch {}
-        }
-        activeMediaCall = peer.call(conn.peer, localStream);
-      }
+      startMediaCallToController(conn.peer);
     };
 
     if (conn.open) {
@@ -453,17 +656,29 @@
       conn.on('open', onOpenSendAndCall);
     }
 
-    conn.on('data', handleIncomingData);
+    // Bind data listener ONLY if not already bound in peer.on('connection')
+    if (!conn._partnerDataBound) {
+      conn._partnerDataBound = true;
+      conn.on('data', (msg) => {
+        if (!msg || typeof msg !== 'object') return;
+        if (conn === activeDataConn) {
+          handleIncomingData(msg);
+        }
+      });
+    }
 
-    conn.on('close', () => {
-      if (conn._replaced || explicitlyStopped) return;
-      handleUnexpectedPartnerDisconnect();
-    });
+    if (!conn._partnerCloseBound) {
+      conn._partnerCloseBound = true;
+      conn.on('close', () => {
+        if (conn._replaced || explicitlyStopped) return;
+        handleUnexpectedPartnerDisconnect();
+      });
 
-    conn.on('error', () => {
-      if (conn._replaced || explicitlyStopped) return;
-      handleUnexpectedPartnerDisconnect();
-    });
+      conn.on('error', () => {
+        if (conn._replaced || explicitlyStopped) return;
+        handleUnexpectedPartnerDisconnect();
+      });
+    }
   }
 
   function handleUnexpectedPartnerDisconnect() {
@@ -472,32 +687,56 @@
       return;
     }
 
-    // Keep localStream alive and auto-reconnect in the background!
     if (activeStatusIcon) activeStatusIcon.textContent = '🔄';
     if (activeStatusHeading) activeStatusHeading.textContent = 'Reconnecting to Partner...';
     activePartnerStatus.textContent = 'Brief network interruption — automatically reconnecting your screen stream...';
 
-    schedulePartnerAutoReconnect(1500);
+    // Wait 3.8s so Controller's fast reconnect attempt (0.7s) arrives first without glare
+    schedulePartnerAutoReconnect(3800);
   }
 
   function schedulePartnerAutoReconnect(delayMs) {
     if (partnerReconnectTimer) clearTimeout(partnerReconnectTimer);
     partnerReconnectTimer = setTimeout(() => {
       if (explicitlyStopped || !localStream || !localStream.active) return;
-      if (activeDataConn && activeDataConn.open) return;
+      if (activeDataConn && activeDataConn.open && Date.now() - sessionState.lastRemoteActivityAt < 10000) return;
 
       if (peer && peer.disconnected && !peer.destroyed) {
         try { peer.reconnect(); } catch {}
       }
 
+      if (
+        pendingReconnectConn &&
+        !pendingReconnectConn.open &&
+        Date.now() - pendingReconnectStartedAt < 5500
+      ) {
+        schedulePartnerAutoReconnect(2500);
+        return;
+      }
+
+      cancelPendingReconnectConn();
+
       if (sessionState.lastControllerPeerId && peer && !peer.destroyed && !peer.disconnected) {
         try {
           const conn = peer.connect(sessionState.lastControllerPeerId, { reliable: true });
-          attachPartnerActiveConnection(conn, 'partner-invite-ready');
+          pendingReconnectConn = conn;
+          pendingReconnectStartedAt = Date.now();
+
+          conn.on('open', () => {
+            if (conn._replaced || explicitlyStopped) return;
+            pendingReconnectConn = null;
+            attachPartnerActiveConnection(conn, 'partner-invite-ready');
+          });
+
+          conn.on('error', () => {
+            if (pendingReconnectConn === conn) {
+              pendingReconnectConn = null;
+            }
+          });
         } catch {}
       }
 
-      schedulePartnerAutoReconnect(2800);
+      schedulePartnerAutoReconnect(4200);
     }, delayMs);
   }
 
@@ -512,9 +751,20 @@
     if (inviteRoomCode) {
       const targetPeerId = PEER_PREFIX_CTRL + inviteRoomCode.replace(/\D/g, '');
       sessionState.lastControllerPeerId = targetPeerId;
-      const conn = peer.connect(targetPeerId, { reliable: true });
-      attachPartnerActiveConnection(conn, 'partner-invite-ready');
       showStep(stepActive);
+
+      if (peer && !peer.destroyed && !peer.disconnected && peer.open) {
+        const conn = peer.connect(targetPeerId, { reliable: true });
+        attachPartnerActiveConnection(conn, 'partner-invite-ready');
+        // Fallback if initial connection doesn't open within 5s
+        setTimeout(() => {
+          if (!explicitlyStopped && (!activeDataConn || !activeDataConn.open)) {
+            handleUnexpectedPartnerDisconnect();
+          }
+        }, 5000);
+      } else {
+        handleUnexpectedPartnerDisconnect();
+      }
     } else {
       activePartnerStatus.innerHTML = `Share Code <strong style="color:#60a5fa;">${sessionState.sessionId.slice(0, 3)}-${sessionState.sessionId.slice(3)}</strong> and PIN <strong style="color:#34d399;">${sessionState.pin}</strong> with your partner.`;
       showStep(stepActive);
@@ -548,12 +798,15 @@
 
   activeControlSwitch.addEventListener('change', () => {
     sessionState.allowControl = activeControlSwitch.checked;
+    updateMissingHelperWarningVisibility();
     notifyControllerPermissions();
   });
 
   function stopSession(isExplicit = true) {
     explicitlyStopped = Boolean(isExplicit);
     sessionState.connected = false;
+    cancelPendingReconnectConn();
+    releaseTabKeepAwake();
 
     if (partnerReconnectTimer) {
       clearTimeout(partnerReconnectTimer);

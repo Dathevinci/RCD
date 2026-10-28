@@ -24,6 +24,9 @@ namespace RemoteAssist
         [DllImport("user32.dll")]
         private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);
 
+        [DllImport("user32.dll")]
+        private static extern short VkKeyScan(char ch);
+
         private const uint MOUSEEVENTF_LEFTDOWN   = 0x0002;
         private const uint MOUSEEVENTF_LEFTUP     = 0x0004;
         private const uint MOUSEEVENTF_RIGHTDOWN  = 0x0008;
@@ -36,25 +39,37 @@ namespace RemoteAssist
         private const byte VK_RETURN  = 0x0D;
         private const byte VK_BACK    = 0x08;
         private const byte VK_TAB     = 0x09;
+        private const byte VK_SHIFT   = 0x10;
+        private const byte VK_CONTROL = 0x11;
+        private const byte VK_MENU    = 0x12; // Alt
         private const byte VK_ESCAPE  = 0x1B;
         private const byte VK_SPACE   = 0x20;
+        private const byte VK_PRIOR   = 0x21; // PageUp
+        private const byte VK_NEXT    = 0x22; // PageDown
+        private const byte VK_END     = 0x23;
+        private const byte VK_HOME    = 0x24;
         private const byte VK_LEFT    = 0x25;
         private const byte VK_UP      = 0x26;
         private const byte VK_RIGHT   = 0x27;
         private const byte VK_DOWN    = 0x28;
         private const byte VK_DELETE  = 0x2E;
         private const byte VK_LWIN    = 0x5B;
-        private const byte VK_CONTROL = 0x11;
-        private const byte VK_MENU    = 0x12; // Alt
+
         private const byte VK_A       = 0x41;
         private const byte VK_C       = 0x43;
         private const byte VK_D       = 0x44;
         private const byte VK_E       = 0x45;
+        private const byte VK_F       = 0x46;
+        private const byte VK_R       = 0x52;
+        private const byte VK_S       = 0x53;
         private const byte VK_V       = 0x56;
+        private const byte VK_X       = 0x58;
+        private const byte VK_Y       = 0x59;
         private const byte VK_Z       = 0x5A;
 
         private HttpListener listener;
         private Thread serverThread;
+        private readonly object inputLock = new object();
         private volatile bool isRunning = true;
         private volatile bool allowOsControl = true;
         private long commandCount = 0;
@@ -62,15 +77,44 @@ namespace RemoteAssist
         private Label statusLabel;
         private Label statsLabel;
         private CheckBox allowCheckBox;
+        private Button minimizeButton;
         private Button stopButton;
+
+        // Prevent helper window from stealing keyboard focus when launched or shown
+        protected override bool ShowWithoutActivation
+        {
+            get { return true; }
+        }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                cp.ExStyle |= 0x08000000; // WS_EX_NOACTIVATE
+                return cp;
+            }
+        }
+
+        // Never allow remote Enter/Space/Tab keys to accidentally trigger Stop or uncheck permissions
+        protected override bool ProcessDialogKey(Keys keyData)
+        {
+            Keys keyCode = keyData & Keys.KeyCode;
+            if (keyCode == Keys.Space || keyCode == Keys.Return || keyCode == Keys.Enter || keyCode == Keys.Tab)
+            {
+                return true;
+            }
+            return base.ProcessDialogKey(keyData);
+        }
 
         public HelperForm()
         {
             this.Text = "Prashnaa — Full Control Helper (v4)";
-            this.Size = new Size(375, 238);
+            this.Size = new Size(370, 232);
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
             this.MaximizeBox = false;
             this.TopMost = true;
+            this.KeyPreview = true;
             this.BackColor = Color.FromArgb(15, 23, 42);
             this.ForeColor = Color.FromArgb(241, 245, 249);
             this.Font = new Font("Segoe UI", 9.5F, FontStyle.Regular);
@@ -82,16 +126,33 @@ namespace RemoteAssist
 
             Label titleLabel = new Label();
             titleLabel.Text = "🛡️ Prashnaa — Full Control Helper";
-            titleLabel.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
+            titleLabel.Font = new Font("Segoe UI", 10.5F, FontStyle.Bold);
             titleLabel.Location = new Point(16, 12);
-            titleLabel.Size = new Size(335, 24);
+            titleLabel.Size = new Size(255, 24);
             this.Controls.Add(titleLabel);
+
+            minimizeButton = new Button();
+            minimizeButton.Text = "Hide";
+            minimizeButton.Font = new Font("Segoe UI", 8F, FontStyle.Bold);
+            minimizeButton.BackColor = Color.FromArgb(30, 41, 59);
+            minimizeButton.ForeColor = Color.FromArgb(148, 163, 184);
+            minimizeButton.FlatStyle = FlatStyle.Flat;
+            minimizeButton.FlatAppearance.BorderSize = 1;
+            minimizeButton.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            minimizeButton.Location = new Point(282, 10);
+            minimizeButton.Size = new Size(58, 24);
+            minimizeButton.TabStop = false;
+            minimizeButton.Cursor = Cursors.Hand;
+            minimizeButton.Click += (s, e) => {
+                this.WindowState = FormWindowState.Minimized;
+            };
+            this.Controls.Add(minimizeButton);
 
             statusLabel = new Label();
             statusLabel.Text = "🟢 Ready — Partner can control mouse & open files";
             statusLabel.ForeColor = Color.FromArgb(52, 211, 153);
             statusLabel.Location = new Point(16, 38);
-            statusLabel.Size = new Size(340, 20);
+            statusLabel.Size = new Size(335, 20);
             this.Controls.Add(statusLabel);
 
             statsLabel = new Label();
@@ -99,15 +160,16 @@ namespace RemoteAssist
             statsLabel.ForeColor = Color.FromArgb(148, 163, 184);
             statsLabel.Font = new Font("Segoe UI", 8.25F, FontStyle.Regular);
             statsLabel.Location = new Point(16, 58);
-            statsLabel.Size = new Size(340, 18);
+            statsLabel.Size = new Size(335, 18);
             this.Controls.Add(statsLabel);
 
             allowCheckBox = new CheckBox();
             allowCheckBox.Text = "Allow Partner Full Mouse && Keyboard Control";
             allowCheckBox.Checked = true;
-            allowCheckBox.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
+            allowCheckBox.TabStop = false;
+            allowCheckBox.Font = new Font("Segoe UI", 9.25F, FontStyle.Bold);
             allowCheckBox.Location = new Point(18, 82);
-            allowCheckBox.Size = new Size(330, 26);
+            allowCheckBox.Size = new Size(325, 24);
             allowCheckBox.CheckedChanged += (s, e) => {
                 allowOsControl = allowCheckBox.Checked;
                 UpdateStatusText();
@@ -116,13 +178,14 @@ namespace RemoteAssist
 
             stopButton = new Button();
             stopButton.Text = "🛑 STOP && CLOSE PRASHNAA HELPER";
-            stopButton.Font = new Font("Segoe UI", 9.75F, FontStyle.Bold);
+            stopButton.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
             stopButton.BackColor = Color.FromArgb(239, 68, 68);
             stopButton.ForeColor = Color.White;
             stopButton.FlatStyle = FlatStyle.Flat;
             stopButton.FlatAppearance.BorderSize = 0;
-            stopButton.Location = new Point(16, 120);
-            stopButton.Size = new Size(326, 44);
+            stopButton.Location = new Point(16, 116);
+            stopButton.Size = new Size(324, 42);
+            stopButton.TabStop = false;
             stopButton.Cursor = Cursors.Hand;
             stopButton.Click += (s, e) => {
                 this.Close();
@@ -130,10 +193,10 @@ namespace RemoteAssist
             this.Controls.Add(stopButton);
 
             Label footerLabel = new Label();
-            footerLabel.Text = "Keep this small window open or minimized while sharing.";
+            footerLabel.Text = "Click 'Hide' to minimize to taskbar while sharing screen.";
             footerLabel.ForeColor = Color.FromArgb(100, 116, 139);
             footerLabel.Font = new Font("Segoe UI", 8F, FontStyle.Regular);
-            footerLabel.Location = new Point(16, 170);
+            footerLabel.Location = new Point(16, 164);
             footerLabel.Size = new Size(330, 18);
             this.Controls.Add(footerLabel);
 
@@ -169,14 +232,20 @@ namespace RemoteAssist
             try
             {
                 int currentId = Process.GetCurrentProcess().Id;
-                string currentName = Process.GetCurrentProcess().ProcessName;
-                Process[] procs = Process.GetProcessesByName(currentName);
-                foreach (Process p in procs)
+                Process[] allProcs = Process.GetProcesses();
+                foreach (Process p in allProcs)
                 {
-                    if (p.Id != currentId)
+                    try
                     {
-                        try { p.Kill(); p.WaitForExit(500); } catch { }
+                        if (p.Id != currentId &&
+                            (p.ProcessName.StartsWith("RemoteAssist-Helper", StringComparison.OrdinalIgnoreCase) ||
+                             p.ProcessName.StartsWith("Prashnaa", StringComparison.OrdinalIgnoreCase)))
+                        {
+                            p.Kill();
+                            p.WaitForExit(500);
+                        }
                     }
+                    catch { }
                 }
             }
             catch { }
@@ -206,7 +275,7 @@ namespace RemoteAssist
                     catch
                     {
                         if (!isRunning) break;
-                        Thread.Sleep(250);
+                        Thread.Sleep(200);
                     }
                 }
             });
@@ -236,6 +305,7 @@ namespace RemoteAssist
                 res.Headers.Add("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
                 res.Headers.Add("Access-Control-Allow-Headers", "*");
                 res.Headers.Add("Access-Control-Allow-Private-Network", "true");
+                res.Headers.Add("Access-Control-Max-Age", "86400");
 
                 if (req.HttpMethod == "OPTIONS")
                 {
@@ -270,13 +340,16 @@ namespace RemoteAssist
                         body = reader.ReadToEnd();
                     }
 
-                    // Send HTTP response immediately so browser socket never blocks or queues up
+                    // Respond immediately so browser connection pool is never blocked
                     SendJsonResponse(res, "{\"ok\":true}", 200);
 
                     if (allowOsControl && !string.IsNullOrEmpty(body))
                     {
                         Interlocked.Increment(ref commandCount);
-                        ExecuteInputCommand(body, bounds.Width, bounds.Height);
+                        lock (inputLock)
+                        {
+                            ExecuteInputCommand(body, bounds.Width, bounds.Height);
+                        }
                     }
                     return;
                 }
@@ -329,13 +402,13 @@ namespace RemoteAssist
                 if (btn == "right")
                 {
                     mouse_event(MOUSEEVENTF_RIGHTDOWN, x, y, 0, 0);
-                    Thread.Sleep(18);
+                    Thread.Sleep(15);
                     mouse_event(MOUSEEVENTF_RIGHTUP, x, y, 0, 0);
                 }
                 else
                 {
                     mouse_event(MOUSEEVENTF_LEFTDOWN, x, y, 0, 0);
-                    Thread.Sleep(18);
+                    Thread.Sleep(15);
                     mouse_event(MOUSEEVENTF_LEFTUP, x, y, 0, 0);
                 }
             }
@@ -344,7 +417,7 @@ namespace RemoteAssist
                 SetCursorPos(x, y);
                 mouse_event(MOUSEEVENTF_LEFTDOWN, x, y, 0, 0);
                 mouse_event(MOUSEEVENTF_LEFTUP, x, y, 0, 0);
-                Thread.Sleep(35);
+                Thread.Sleep(30);
                 SetCursorPos(x, y);
                 mouse_event(MOUSEEVENTF_LEFTDOWN, x, y, 0, 0);
                 mouse_event(MOUSEEVENTF_LEFTUP, x, y, 0, 0);
@@ -352,14 +425,14 @@ namespace RemoteAssist
             else if (type == "mouse-scroll")
             {
                 double deltaY = ExtractDouble(json, "deltaY");
-                int wheel = (int)Math.Max(-360, Math.Min(360, -deltaY));
+                int wheel = (int)Math.Max(-480, Math.Min(480, -deltaY));
                 mouse_event(MOUSEEVENTF_WHEEL, 0, 0, wheel, 0);
             }
             else if (type == "show-desktop")
             {
                 keybd_event(VK_LWIN, 0, 0, 0);
                 keybd_event(VK_D, 0, 0, 0);
-                Thread.Sleep(20);
+                Thread.Sleep(18);
                 keybd_event(VK_D, 0, KEYEVENTF_KEYUP, 0);
                 keybd_event(VK_LWIN, 0, KEYEVENTF_KEYUP, 0);
             }
@@ -375,25 +448,18 @@ namespace RemoteAssist
             else if (type == "key-down")
             {
                 string key = ExtractString(json, "key");
-                SendKeyOnUiThread(key);
+                SendKeyInput(key);
             }
             else if (type == "type-text")
             {
                 string text = ExtractString(json, "text");
                 if (!string.IsNullOrEmpty(text))
                 {
-                    this.BeginInvoke(new Action(() => {
-                        try
-                        {
-                            foreach (char c in text)
-                            {
-                                string s = c.ToString();
-                                if ("+^%~(){}[]".IndexOf(c) >= 0) s = "{" + c + "}";
-                                SendKeys.SendWait(s);
-                            }
-                        }
-                        catch { }
-                    }));
+                    foreach (char c in text)
+                    {
+                        SendCharByVkOrSendKeys(c);
+                        Thread.Sleep(4);
+                    }
                 }
             }
         }
@@ -401,25 +467,28 @@ namespace RemoteAssist
         private void ExecuteHotkey(string action)
         {
             if (string.IsNullOrEmpty(action)) return;
-            if (action == "copy")
+            switch (action)
             {
-                TapChord(VK_CONTROL, VK_C);
-            }
-            else if (action == "paste")
-            {
-                TapChord(VK_CONTROL, VK_V);
-            }
-            else if (action == "select-all")
-            {
-                TapChord(VK_CONTROL, VK_A);
-            }
-            else if (action == "undo")
-            {
-                TapChord(VK_CONTROL, VK_Z);
-            }
-            else if (action == "alt-tab")
-            {
-                TapChord(VK_MENU, VK_TAB);
+                case "copy": TapChord(VK_CONTROL, VK_C); break;
+                case "paste": TapChord(VK_CONTROL, VK_V); break;
+                case "cut": TapChord(VK_CONTROL, VK_X); break;
+                case "select-all": TapChord(VK_CONTROL, VK_A); break;
+                case "undo": TapChord(VK_CONTROL, VK_Z); break;
+                case "redo": TapChord(VK_CONTROL, VK_Y); break;
+                case "save": TapChord(VK_CONTROL, VK_S); break;
+                case "find": TapChord(VK_CONTROL, VK_F); break;
+                case "refresh": TapChord(VK_CONTROL, VK_R); break;
+                case "alt-tab": TapChord(VK_MENU, VK_TAB); break;
+                case "start-menu": TapVirtualKey(VK_LWIN); break;
+                case "task-manager":
+                    keybd_event(VK_CONTROL, 0, 0, 0);
+                    keybd_event(VK_SHIFT, 0, 0, 0);
+                    keybd_event(VK_ESCAPE, 0, 0, 0);
+                    Thread.Sleep(18);
+                    keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYUP, 0);
+                    keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0);
+                    keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
+                    break;
             }
         }
 
@@ -427,7 +496,7 @@ namespace RemoteAssist
         {
             keybd_event(modifierVk, 0, 0, 0);
             keybd_event(keyVk, 0, 0, 0);
-            Thread.Sleep(18);
+            Thread.Sleep(15);
             keybd_event(keyVk, 0, KEYEVENTF_KEYUP, 0);
             keybd_event(modifierVk, 0, KEYEVENTF_KEYUP, 0);
         }
@@ -435,11 +504,47 @@ namespace RemoteAssist
         private void TapVirtualKey(byte vk)
         {
             keybd_event(vk, 0, 0, 0);
-            Thread.Sleep(12);
+            Thread.Sleep(10);
             keybd_event(vk, 0, KEYEVENTF_KEYUP, 0);
         }
 
-        private void SendKeyOnUiThread(string key)
+        private void SendCharByVkOrSendKeys(char c)
+        {
+            short vks = VkKeyScan(c);
+            if (vks != -1)
+            {
+                byte vk = (byte)(vks & 0xFF);
+                byte shiftState = (byte)((vks >> 8) & 0xFF);
+                bool needShift = (shiftState & 1) != 0;
+                bool needCtrl = (shiftState & 2) != 0;
+                bool needAlt = (shiftState & 4) != 0;
+
+                if (needCtrl) keybd_event(VK_CONTROL, 0, 0, 0);
+                if (needAlt) keybd_event(VK_MENU, 0, 0, 0);
+                if (needShift) keybd_event(VK_SHIFT, 0, 0, 0);
+
+                keybd_event(vk, 0, 0, 0);
+                Thread.Sleep(6);
+                keybd_event(vk, 0, KEYEVENTF_KEYUP, 0);
+
+                if (needShift) keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0);
+                if (needAlt) keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
+                if (needCtrl) keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
+                return;
+            }
+
+            this.BeginInvoke(new Action(() => {
+                try
+                {
+                    string s = c.ToString();
+                    if ("+^%~(){}[]".IndexOf(c) >= 0) s = "{" + c + "}";
+                    SendKeys.SendWait(s);
+                }
+                catch { }
+            }));
+        }
+
+        private void SendKeyInput(string key)
         {
             if (string.IsNullOrEmpty(key)) return;
 
@@ -455,34 +560,28 @@ namespace RemoteAssist
                 case "ArrowRight": TapVirtualKey(VK_RIGHT); return;
                 case "ArrowDown": TapVirtualKey(VK_DOWN); return;
                 case "Delete": TapVirtualKey(VK_DELETE); return;
+                case "Home": TapVirtualKey(VK_HOME); return;
+                case "End": TapVirtualKey(VK_END); return;
+                case "PageUp": TapVirtualKey(VK_PRIOR); return;
+                case "PageDown": TapVirtualKey(VK_NEXT); return;
+                case "F1": TapVirtualKey(0x70); return;
+                case "F2": TapVirtualKey(0x71); return;
+                case "F3": TapVirtualKey(0x72); return;
+                case "F4": TapVirtualKey(0x73); return;
+                case "F5": TapVirtualKey(0x74); return;
+                case "F6": TapVirtualKey(0x75); return;
+                case "F7": TapVirtualKey(0x76); return;
+                case "F8": TapVirtualKey(0x77); return;
+                case "F9": TapVirtualKey(0x78); return;
+                case "F10": TapVirtualKey(0x79); return;
+                case "F11": TapVirtualKey(0x7A); return;
+                case "F12": TapVirtualKey(0x7B); return;
             }
 
-            string sendKey = MapSafeSendKey(key);
-            if (!string.IsNullOrEmpty(sendKey))
-            {
-                this.BeginInvoke(new Action(() => {
-                    try { SendKeys.SendWait(sendKey); } catch { }
-                }));
-            }
-        }
-
-        private string MapSafeSendKey(string key)
-        {
-            switch (key)
-            {
-                case "Home": return "{HOME}";
-                case "End": return "{END}";
-                case "PageUp": return "{PGUP}";
-                case "PageDown": return "{PGDN}";
-            }
             if (key.Length == 1)
             {
-                char c = key[0];
-                if ("+^%~(){}[]".IndexOf(c) >= 0)
-                    return "{" + c + "}";
-                return key;
+                SendCharByVkOrSendKeys(key[0]);
             }
-            return null;
         }
 
         private string ExtractString(string json, string field)
@@ -491,9 +590,22 @@ namespace RemoteAssist
             int idx = json.IndexOf(pattern);
             if (idx < 0) return "";
             idx += pattern.Length;
-            int end = json.IndexOf("\"", idx);
-            if (end < 0) return "";
-            return json.Substring(idx, end - idx);
+            StringBuilder sb = new StringBuilder();
+            for (int i = idx; i < json.Length; i++)
+            {
+                char c = json[i];
+                if (c == '\\' && i + 1 < json.Length)
+                {
+                    char next = json[i + 1];
+                    if (next == '"' || next == '\\' || next == '/') { sb.Append(next); i++; continue; }
+                    if (next == 'n') { sb.Append('\n'); i++; continue; }
+                    if (next == 'r') { sb.Append('\r'); i++; continue; }
+                    if (next == 't') { sb.Append('\t'); i++; continue; }
+                }
+                if (c == '"') break;
+                sb.Append(c);
+            }
+            return sb.ToString();
         }
 
         private double ExtractDouble(string json, string field)

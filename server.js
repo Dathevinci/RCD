@@ -423,7 +423,7 @@ io.on('connection', (socket) => {
 server.listen(PORT, '0.0.0.0', () => {
   const ips = getLocalIpAddresses();
   console.log('\n============================================================');
-  console.log('  🛡️  RemoteAssist — Consent-First Remote Support Server');
+  console.log('  🛡️  Prashnaa — Consent-First Remote Support Server');
   console.log('============================================================');
   console.log(`  Your Controller Dashboard:  http://localhost:${PORT}/?mode=controller`);
   console.log(`  Simple Partner Page:        http://localhost:${PORT}/partner.html`);

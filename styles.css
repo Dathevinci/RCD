@@ -817,6 +817,12 @@ input:checked + .slider:before {
   height: calc(100vh - 105px);
 }
 
+.remote-desktop-shell:fullscreen {
+  height: 100vh;
+  padding: 12px;
+  background: var(--bg-dark);
+}
+
 .remote-toolbar {
   display: flex;
   align-items: center;

@@ -71,16 +71,24 @@
   let activeDataConn = null;
   let activeMediaCall = null;
   let pendingDataConn = null;
+  let pendingReconnectConn = null;
+  let pendingReconnectStartedAt = 0;
   let localDisplayStream = null;
 
   let helperExeActive = false;
   let helperFailStreak = 0;
 
   let reconnectTimer = null;
+  let hostReconnectTimer = null;
   let heartbeatInterval = null;
   let explicitlyEnded = false;
   let chatCollapsed = false;
   let unreadChatCount = 0;
+
+  // Background tab anti-throttling resources (when browser is minimized via Win+D)
+  let wakeLockSentinel = null;
+  let keepAwakeAudioCtx = null;
+  let keepAwakeLockRelease = null;
 
   // DOM Elements
   const workspaceMain = document.getElementById('workspaceMain');
@@ -91,6 +99,7 @@
   const serverDot = document.getElementById('serverDot');
   const serverStatusText = document.getElementById('serverStatusText');
   const toggleChatTopBtn = document.getElementById('toggleChatTopBtn');
+  const toolbarChatBtn = document.getElementById('toolbarChatBtn');
   const closeChatBtn = document.getElementById('closeChatBtn');
   const chatUnreadBadge = document.getElementById('chatUnreadBadge');
 
@@ -146,6 +155,7 @@
   const controllerPermissionBadge = document.getElementById('controllerPermissionBadge');
   const showDesktopBtn = document.getElementById('showDesktopBtn');
   const openExplorerBtn = document.getElementById('openExplorerBtn');
+  const startMenuBtn = document.getElementById('startMenuBtn');
   const singleClickDblToggle = document.getElementById('singleClickDblToggle');
   const sendEnterBtn = document.getElementById('sendEnterBtn');
   const sendRightClickBtn = document.getElementById('sendRightClickBtn');
@@ -192,6 +202,60 @@
     auditLogList.prepend(li);
   }
 
+  // ==================== BACKGROUND TAB ANTI-THROTTLING ====================
+  async function acquireTabKeepAwake() {
+    try {
+      if ('wakeLock' in navigator && !wakeLockSentinel) {
+        wakeLockSentinel = await navigator.wakeLock.request('screen');
+        wakeLockSentinel.addEventListener('release', () => {
+          wakeLockSentinel = null;
+        });
+      }
+    } catch {}
+
+    try {
+      if ('locks' in navigator && !keepAwakeLockRelease) {
+        navigator.locks.request('prashnaa_active_session', () => {
+          return new Promise((resolve) => {
+            keepAwakeLockRelease = resolve;
+          });
+        }).catch(() => {});
+      }
+    } catch {}
+
+    try {
+      if (!keepAwakeAudioCtx) {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (AudioCtx) {
+          keepAwakeAudioCtx = new AudioCtx();
+          const osc = keepAwakeAudioCtx.createOscillator();
+          const gain = keepAwakeAudioCtx.createGain();
+          gain.gain.value = 0.00001;
+          osc.connect(gain);
+          gain.connect(keepAwakeAudioCtx.destination);
+          osc.start();
+        }
+      } else if (keepAwakeAudioCtx.state === 'suspended') {
+        keepAwakeAudioCtx.resume().catch(() => {});
+      }
+    } catch {}
+  }
+
+  function releaseTabKeepAwake() {
+    if (wakeLockSentinel) {
+      try { wakeLockSentinel.release(); } catch {}
+      wakeLockSentinel = null;
+    }
+    if (keepAwakeLockRelease) {
+      try { keepAwakeLockRelease(); } catch {}
+      keepAwakeLockRelease = null;
+    }
+    if (keepAwakeAudioCtx) {
+      try { keepAwakeAudioCtx.close(); } catch {}
+      keepAwakeAudioCtx = null;
+    }
+  }
+
   // ==================== COLLAPSIBLE CHAT SIDEBAR ====================
   function setChatCollapsed(collapsed) {
     chatCollapsed = Boolean(collapsed);
@@ -201,11 +265,15 @@
     if (!chatCollapsed) {
       unreadChatCount = 0;
       if (chatUnreadBadge) chatUnreadBadge.classList.add('hidden');
+      if (toolbarChatBtn) toolbarChatBtn.textContent = '💬 Chat';
     }
   }
 
   if (toggleChatTopBtn) {
     toggleChatTopBtn.addEventListener('click', () => setChatCollapsed(!chatCollapsed));
+  }
+  if (toolbarChatBtn) {
+    toolbarChatBtn.addEventListener('click', () => setChatCollapsed(!chatCollapsed));
   }
   if (closeChatBtn) {
     closeChatBtn.addEventListener('click', () => setChatCollapsed(true));
@@ -228,10 +296,15 @@
     chatMessages.appendChild(div);
     chatMessages.scrollTop = chatMessages.scrollHeight;
 
-    if (!self && chatCollapsed && chatUnreadBadge) {
+    if (!self && chatCollapsed) {
       unreadChatCount++;
-      chatUnreadBadge.textContent = String(unreadChatCount);
-      chatUnreadBadge.classList.remove('hidden');
+      if (chatUnreadBadge) {
+        chatUnreadBadge.textContent = String(unreadChatCount);
+        chatUnreadBadge.classList.remove('hidden');
+      }
+      if (toolbarChatBtn) {
+        toolbarChatBtn.textContent = `💬 Chat (${unreadChatCount})`;
+      }
     }
   }
 
@@ -251,7 +324,6 @@
     switchMode('host');
   }
 
-  // Auto-format 6-digit Session ID input as XXX-XXX
   if (remoteSessionIdInput) {
     remoteSessionIdInput.addEventListener('input', () => {
       const digits = remoteSessionIdInput.value.replace(/\D/g, '').slice(0, 6);
@@ -263,49 +335,78 @@
     });
   }
 
-  // ==================== COALESCED LOCAL HELPER BRIDGE (127.0.0.1:3847) ====================
-  let moveInFlight = false;
+  // ==================== UNIFIED SINGLE-FLIGHT LOCAL HELPER BRIDGE (127.0.0.1:3847) ====================
+  let helperRequestInFlight = false;
   let pendingMoveEvent = null;
+  let pendingScrollDeltaY = 0;
+  const helperActionQueue = [];
 
   function sendToLocalHelper(ev) {
-    if (!hostSession.allowControl || !helperExeActive) return;
+    if (!hostSession.allowControl || !helperExeActive || !ev) return;
 
     if (ev.type === 'pointer-move') {
       pendingMoveEvent = ev;
-      if (!moveInFlight) {
-        flushPendingMove();
-      }
+      pumpLocalHelperQueue();
       return;
     }
 
-    // For clicks, scrolls, keys: flush latest cursor position and send immediately
-    pendingMoveEvent = null;
-    fetch('http://127.0.0.1:3847/input', {
-      method: 'POST',
-      body: JSON.stringify(ev),
-      keepalive: true
-    }).catch(() => {});
+    if (ev.type === 'mouse-scroll') {
+      pendingScrollDeltaY += Number(ev.deltaY) || 0;
+      pumpLocalHelperQueue();
+      return;
+    }
+
+    if (
+      ev.type === 'mouse-down' ||
+      ev.type === 'mouse-up' ||
+      ev.type === 'mouse-click' ||
+      ev.type === 'mouse-dblclick'
+    ) {
+      pendingMoveEvent = null;
+    }
+
+    if (helperActionQueue.length < 40) {
+      helperActionQueue.push(ev);
+    }
+    pumpLocalHelperQueue();
   }
 
-  function flushPendingMove() {
-    if (!pendingMoveEvent) {
-      moveInFlight = false;
-      return;
+  function pumpLocalHelperQueue() {
+    if (helperRequestInFlight) return;
+
+    let nextPayload = null;
+    if (helperActionQueue.length > 0) {
+      nextPayload = helperActionQueue.shift();
+    } else if (pendingScrollDeltaY !== 0) {
+      nextPayload = { type: 'mouse-scroll', deltaY: pendingScrollDeltaY };
+      pendingScrollDeltaY = 0;
+    } else if (pendingMoveEvent) {
+      nextPayload = pendingMoveEvent;
+      pendingMoveEvent = null;
     }
-    const ev = pendingMoveEvent;
-    pendingMoveEvent = null;
-    moveInFlight = true;
+
+    if (!nextPayload) return;
+    helperRequestInFlight = true;
+
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 1200);
 
     fetch('http://127.0.0.1:3847/input', {
       method: 'POST',
-      body: JSON.stringify(ev)
+      body: JSON.stringify(nextPayload),
+      signal: ctrl.signal
     })
+      .then((res) => {
+        if (res && res.ok) {
+          helperFailStreak = 0;
+        }
+      })
       .catch(() => {})
       .finally(() => {
-        if (pendingMoveEvent) {
-          flushPendingMove();
-        } else {
-          moveInFlight = false;
+        clearTimeout(timer);
+        helperRequestInFlight = false;
+        if (helperActionQueue.length > 0 || pendingScrollDeltaY !== 0 || pendingMoveEvent) {
+          pumpLocalHelperQueue();
         }
       });
   }
@@ -322,12 +423,24 @@
       const data = await res.json();
       if (data && data.ok) {
         helperFailStreak = 0;
-        if (!helperExeActive) {
-          helperExeActive = true;
+        const canControl = data.allowControl !== false;
+        const prevActive = helperExeActive;
+        helperExeActive = canControl;
+
+        if (canControl) {
           agentDot.className = 'dot online';
           agentStatusTitle.textContent = `Prashnaa Mouse Helper: Active (${data.width}x${data.height})`;
           agentStatusDesc.textContent = 'Ready! Your partner can click, open files, drag & type when allowed.';
-          addAuditLog('Connected to Prashnaa Helper on 127.0.0.1:3847.');
+          if (!prevActive) {
+            addAuditLog('Connected to Prashnaa Helper on 127.0.0.1:3847.');
+          }
+        } else {
+          agentDot.className = 'dot warning';
+          agentStatusTitle.textContent = 'Prashnaa Mouse Helper: Paused in Helper Window';
+          agentStatusDesc.textContent = 'Check the "Allow Partner Full Mouse & Keyboard Control" box in the Prashnaa Helper window.';
+        }
+
+        if (prevActive !== helperExeActive) {
           notifyHostPermissionsToController();
         }
         return;
@@ -373,7 +486,7 @@
     return `${url.origin}${path}`;
   }
 
-  function attachPeerKeepAlive(peerInstance, label) {
+  function attachPeerKeepAlive(peerInstance) {
     peerInstance.on('disconnected', () => {
       if (peerInstance.destroyed) return;
       serverDot.className = 'dot warning';
@@ -409,9 +522,33 @@
     });
   }
 
+  // Periodic watchdog to ensure signaling connections never stay dead after transient drops
+  setInterval(() => {
+    if (!ctrlPeer || ctrlPeer.destroyed) {
+      initControllerPeer();
+    } else if (ctrlPeer.disconnected) {
+      try { ctrlPeer.reconnect(); } catch {}
+    }
+
+    if (!hostPeer || hostPeer.destroyed) {
+      initHostPeer();
+    } else if (hostPeer.disconnected) {
+      try { hostPeer.reconnect(); } catch {}
+    }
+  }, 4500);
+
   function updateInviteLinkDisplay() {
     const inviteUrl = `${getBaseFolderUrl()}partner.html?room=${controllerInviteCode}`;
     partnerInviteLinkInput.value = inviteUrl;
+  }
+
+  function cancelPendingReconnectConn() {
+    if (pendingReconnectConn) {
+      pendingReconnectConn._replaced = true;
+      try { pendingReconnectConn.close(); } catch {}
+      pendingReconnectConn = null;
+      pendingReconnectStartedAt = 0;
+    }
   }
 
   function initControllerPeer() {
@@ -420,9 +557,15 @@
     }
     updateInviteLinkDisplay();
     ctrlPeer = new Peer(PEER_PREFIX_CTRL + controllerInviteCode, PEER_CONFIG);
-    attachPeerKeepAlive(ctrlPeer, 'Controller');
+    attachPeerKeepAlive(ctrlPeer);
 
     ctrlPeer.on('connection', (conn) => {
+      // Incoming connection from Partner: cancel any outgoing reconnect attempt to prevent glare
+      cancelPendingReconnectConn();
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
       setupControllerDataConnection(conn);
     });
 
@@ -447,10 +590,44 @@
         requestStreamRefresh();
       }
     });
+    call.on('error', () => {
+      if (call._replaced) return;
+      if (controllerState.connected && !explicitlyEnded) {
+        requestStreamRefresh();
+      }
+    });
+
+    // Monitor underlying RTCPeerConnection ICE health for video stream
+    setTimeout(() => {
+      const pc = call.peerConnection;
+      if (!pc) return;
+      let iceDisconnectTimer = null;
+      pc.addEventListener('iceconnectionstatechange', () => {
+        if (call._replaced || explicitlyEnded || !controllerState.connected) return;
+        const state = pc.iceConnectionState;
+        if (state === 'connected' || state === 'completed') {
+          if (iceDisconnectTimer) {
+            clearTimeout(iceDisconnectTimer);
+            iceDisconnectTimer = null;
+          }
+        } else if (state === 'failed') {
+          requestStreamRefresh();
+        } else if (state === 'disconnected') {
+          if (!iceDisconnectTimer) {
+            iceDisconnectTimer = setTimeout(() => {
+              if (!call._replaced && !explicitlyEnded && controllerState.connected && pc.iceConnectionState === 'disconnected') {
+                requestStreamRefresh();
+              }
+            }, 3500);
+          }
+        }
+      });
+    }, 50);
   }
 
   function attachRemoteStreamToVideo(remoteStream) {
     if (!remoteStream) return;
+    remoteScreenVideo.muted = true;
     remoteScreenVideo.srcObject = remoteStream;
     remoteScreenVideo.play().catch(() => {});
     remoteVideoPlaceholder.classList.add('hidden');
@@ -458,13 +635,21 @@
   }
 
   function initHostPeer() {
+    if (hostPeer && !hostPeer.destroyed) {
+      try { hostPeer.destroy(); } catch {}
+    }
     hostSessionIdEl.textContent = formatCode(hostSession.sessionId);
     hostPinEl.textContent = hostSession.pin;
 
     hostPeer = new Peer(PEER_PREFIX_HOST + hostSession.sessionId, PEER_CONFIG);
-    attachPeerKeepAlive(hostPeer, 'Host');
+    attachPeerKeepAlive(hostPeer);
 
     hostPeer.on('connection', (conn) => {
+      if (hostReconnectTimer) {
+        clearTimeout(hostReconnectTimer);
+        hostReconnectTimer = null;
+      }
+
       conn.on('data', (msg) => {
         if (!msg || typeof msg !== 'object') return;
         if (msg.type === 'join-request') {
@@ -482,8 +667,6 @@
             return;
           }
 
-          // If the same approved controller is auto-reconnecting and our screen stream is still active,
-          // seamlessly re-attach without interrupting the host with another popup!
           if ((isApprovedPeerReconnect || (isValidPin && hostSession.connected)) && localDisplayStream && localDisplayStream.active) {
             attachApprovedHostDataConn(conn, hostSession.allowControl);
             addAuditLog(`Auto-reconnected with "${hostSession.partnerName}".`);
@@ -560,6 +743,7 @@
       localDisplayStream = stream;
       hostPreviewVideo.srcObject = stream;
       hostStagePlaceholder.classList.add('hidden');
+      acquireTabKeepAwake();
 
       const track = stream.getVideoTracks()[0];
       if (track) {
@@ -590,7 +774,39 @@
     }
   });
 
+  function scheduleHostAutoReconnect(delayMs) {
+    if (hostReconnectTimer) clearTimeout(hostReconnectTimer);
+    hostReconnectTimer = setTimeout(() => {
+      if (explicitlyEnded || !localDisplayStream || !localDisplayStream.active) return;
+      if (activeDataConn && activeDataConn.open) return;
+
+      if (hostPeer && hostPeer.disconnected && !hostPeer.destroyed) {
+        try { hostPeer.reconnect(); } catch {}
+      }
+
+      if (hostSession.approvedControllerPeerId && hostPeer && !hostPeer.destroyed && !hostPeer.disconnected) {
+        try {
+          const conn = hostPeer.connect(hostSession.approvedControllerPeerId, { reliable: true });
+          conn.on('open', () => {
+            if (conn._replaced || explicitlyEnded) return;
+            conn.on('data', (msg) => {
+              if (!msg || typeof msg !== 'object') return;
+              if (conn === activeDataConn) handleHostDataMessage(msg);
+            });
+            attachApprovedHostDataConn(conn, hostSession.allowControl);
+          });
+        } catch {}
+      }
+
+      scheduleHostAutoReconnect(4500);
+    }, delayMs);
+  }
+
   function attachApprovedHostDataConn(conn, allowControl) {
+    if (hostReconnectTimer) {
+      clearTimeout(hostReconnectTimer);
+      hostReconnectTimer = null;
+    }
     if (activeDataConn && activeDataConn !== conn) {
       activeDataConn._replaced = true;
       try { activeDataConn.close(); } catch {}
@@ -629,8 +845,14 @@
 
     conn.on('close', () => {
       if (conn._replaced || explicitlyEnded) return;
-      addAuditLog('Connection interrupted — waiting for automatic reconnect...');
+      addAuditLog('Connection interrupted — reconnecting automatically...');
       connectedModeLabel.textContent = 'Status: Reconnecting automatically...';
+      scheduleHostAutoReconnect(4000);
+    });
+
+    conn.on('error', () => {
+      if (conn._replaced || explicitlyEnded) return;
+      scheduleHostAutoReconnect(4000);
     });
   }
 
@@ -733,11 +955,17 @@
         } catch {}
       }
 
+      // Ensure remoteScreenVideo is playing if stream is present
+      if (remoteScreenVideo.srcObject && remoteScreenVideo.paused) {
+        remoteScreenVideo.muted = true;
+        remoteScreenVideo.play().catch(() => {});
+      }
+
       const elapsed = Date.now() - controllerState.lastPongAt;
-      if (elapsed > 9500 && !controllerState.reconnecting) {
+      if (elapsed > 14000 && !controllerState.reconnecting) {
         triggerControllerReconnect('Connection timed out — reconnecting...');
       }
-    }, 2500);
+    }, 2200);
   }
 
   function stopControllerHeartbeat() {
@@ -763,6 +991,7 @@
 
   function hideReconnectBanner() {
     controllerState.reconnecting = false;
+    cancelPendingReconnectConn();
     if (connectionPulseDot) connectionPulseDot.classList.remove('reconnecting');
     if (reconnectBanner) reconnectBanner.classList.add('hidden');
     if (reconnectTimer) {
@@ -774,7 +1003,7 @@
   function triggerControllerReconnect(reasonText) {
     if (explicitlyEnded || !controllerState.connected) return;
     showReconnectBanner(reasonText || 'Network hiccup — Auto-reconnecting to partner...');
-    scheduleNextReconnectAttempt(600);
+    scheduleNextReconnectAttempt(700);
   }
 
   function scheduleNextReconnectAttempt(delayMs) {
@@ -785,12 +1014,25 @@
     }, delayMs);
   }
 
-  function attemptAutoReconnect() {
+  function attemptAutoReconnect(forceImmediate = false) {
     if (explicitlyEnded || !controllerState.connected) return;
 
     if (ctrlPeer && ctrlPeer.disconnected && !ctrlPeer.destroyed) {
       try { ctrlPeer.reconnect(); } catch {}
     }
+
+    // If an outgoing reconnect attempt is already in flight and under 5.5s old, let ICE finish instead of killing it
+    if (
+      !forceImmediate &&
+      pendingReconnectConn &&
+      !pendingReconnectConn.open &&
+      Date.now() - pendingReconnectStartedAt < 5500
+    ) {
+      scheduleNextReconnectAttempt(2000);
+      return;
+    }
+
+    cancelPendingReconnectConn();
 
     const targetPeerId =
       controllerState.lastRemotePeerId ||
@@ -799,20 +1041,33 @@
     if (targetPeerId && ctrlPeer && !ctrlPeer.destroyed && !ctrlPeer.disconnected) {
       try {
         const conn = ctrlPeer.connect(targetPeerId, { reliable: true });
-        setupControllerDataConnection(conn);
+        pendingReconnectConn = conn;
+        pendingReconnectStartedAt = Date.now();
+
         conn.on('open', () => {
-          conn.send({
-            type: 'join-request',
-            pin: controllerState.lastPin,
-            controllerName: (controllerNameInput && controllerNameInput.value.trim()) || 'Your Partner',
-            requestControl: requestControlCheckbox ? requestControlCheckbox.checked : true,
-            isReconnect: true
-          });
+          if (conn._replaced || explicitlyEnded) return;
+          pendingReconnectConn = null;
+          setupControllerDataConnection(conn);
+          try {
+            conn.send({
+              type: 'join-request',
+              pin: controllerState.lastPin,
+              controllerName: (controllerNameInput && controllerNameInput.value.trim()) || 'Your Partner',
+              requestControl: requestControlCheckbox ? requestControlCheckbox.checked : true,
+              isReconnect: true
+            });
+          } catch {}
+        });
+
+        conn.on('error', () => {
+          if (pendingReconnectConn === conn) {
+            pendingReconnectConn = null;
+          }
         });
       } catch {}
     }
 
-    scheduleNextReconnectAttempt(2600);
+    scheduleNextReconnectAttempt(3200);
   }
 
   function requestStreamRefresh() {
@@ -827,7 +1082,7 @@
 
   if (reconnectNowBtn) {
     reconnectNowBtn.addEventListener('click', () => {
-      attemptAutoReconnect();
+      attemptAutoReconnect(true);
     });
   }
 
@@ -839,6 +1094,7 @@
 
   // ==================== CONTROLLER CONNECTION & INPUT ====================
   function setupControllerDataConnection(conn) {
+    if (!conn) return;
     if (activeDataConn && activeDataConn !== conn) {
       activeDataConn._replaced = true;
       try { activeDataConn.close(); } catch {}
@@ -848,75 +1104,110 @@
       controllerState.lastRemotePeerId = conn.peer;
     }
 
-    conn.on('data', (msg) => {
-      if (!msg || typeof msg !== 'object') return;
-      controllerState.lastPongAt = Date.now();
+    if (!conn._controllerDataBound) {
+      conn._controllerDataBound = true;
 
-      if (msg.type === 'pong' && typeof msg.ts === 'number') {
-        const rtt = Math.max(1, Date.now() - msg.ts);
-        updateLatencyBadge(rtt);
-        if (controllerState.reconnecting) hideReconnectBanner();
-        return;
-      }
-
-      if (msg.type === 'ping') {
-        try { conn.send({ type: 'pong', ts: msg.ts }); } catch {}
-        return;
-      }
-
-      if (msg.type === 'request-declined') {
-        requestJoinBtn.disabled = false;
-        waitingApprovalBanner.classList.add('hidden');
-        controllerErrorBox.textContent = msg.reason || 'Connection declined.';
-        controllerErrorBox.classList.remove('hidden');
-      } else if (msg.type === 'request-approved' || msg.type === 'partner-invite-ready') {
-        explicitlyEnded = false;
-        requestJoinBtn.disabled = false;
-        waitingApprovalBanner.classList.add('hidden');
-        controllerErrorBox.classList.add('hidden');
-
-        controllerState.connected = true;
-        controllerState.lastRemotePeerId = conn.peer;
-        controllerState.hostName = msg.hostName || 'Partner Laptop';
-        controllerState.allowControl = Boolean(msg.allowControl);
-        controllerState.helperRunning = Boolean(msg.helperRunning);
+      conn.on('data', (msg) => {
+        if (!msg || typeof msg !== 'object') return;
         controllerState.lastPongAt = Date.now();
 
-        hideReconnectBanner();
-        startControllerHeartbeat();
-
-        switchMode('controller');
-        controllerConnectCard.classList.add('hidden');
-        remoteDesktopShell.classList.remove('hidden');
-        remoteHostTitle.textContent = `Connected to ${controllerState.hostName}`;
-        updateControllerPermissionBadge();
-        remoteScreenWrapper.focus();
-      } else if (msg.type === 'permissions-updated') {
-        controllerState.allowControl = Boolean(msg.allowControl);
-        if (msg.helperRunning !== undefined) {
-          controllerState.helperRunning = Boolean(msg.helperRunning);
+        if (msg.type === 'pong' && typeof msg.ts === 'number') {
+          const rtt = Math.max(1, Date.now() - msg.ts);
+          updateLatencyBadge(rtt);
+          if (controllerState.reconnecting) hideReconnectBanner();
+          return;
         }
-        updateControllerPermissionBadge();
-      } else if (msg.type === 'chat') {
-        appendChatMessage({ senderName: msg.senderName || 'Partner', text: msg.text, self: false });
-      } else if (msg.type === 'end-session') {
-        endCurrentSession(true);
-      }
-    });
 
-    conn.on('close', () => {
-      if (conn._replaced || explicitlyEnded) return;
-      if (controllerState.connected) {
-        triggerControllerReconnect('Connection interrupted — Auto-reconnecting to partner...');
-      }
-    });
+        if (msg.type === 'ping') {
+          try { conn.send({ type: 'pong', ts: msg.ts }); } catch {}
+          return;
+        }
 
-    conn.on('error', () => {
-      if (conn._replaced || explicitlyEnded) return;
-      if (controllerState.connected) {
-        triggerControllerReconnect('Network glitch — Auto-reconnecting...');
-      }
-    });
+        if (msg.type === 'request-declined') {
+          requestJoinBtn.disabled = false;
+          waitingApprovalBanner.classList.add('hidden');
+          controllerErrorBox.textContent = msg.reason || 'Connection declined.';
+          controllerErrorBox.classList.remove('hidden');
+        } else if (msg.type === 'request-approved' || msg.type === 'partner-invite-ready') {
+          const wasAlreadyConnected = controllerState.connected;
+          explicitlyEnded = false;
+          requestJoinBtn.disabled = false;
+          waitingApprovalBanner.classList.add('hidden');
+          controllerErrorBox.classList.add('hidden');
+
+          controllerState.connected = true;
+          controllerState.lastRemotePeerId = conn.peer;
+          controllerState.hostName = msg.hostName || 'Partner Laptop';
+          controllerState.allowControl = Boolean(msg.allowControl);
+          controllerState.helperRunning = Boolean(msg.helperRunning);
+          controllerState.lastPongAt = Date.now();
+
+          hideReconnectBanner();
+          startControllerHeartbeat();
+          acquireTabKeepAwake();
+
+          switchMode('controller');
+          controllerConnectCard.classList.add('hidden');
+          remoteDesktopShell.classList.remove('hidden');
+          if (!wasAlreadyConnected) {
+            setChatCollapsed(true);
+          }
+          remoteHostTitle.textContent = `Connected to ${controllerState.hostName}`;
+          updateControllerPermissionBadge();
+          remoteScreenWrapper.focus();
+        } else if (msg.type === 'permissions-updated') {
+          controllerState.allowControl = Boolean(msg.allowControl);
+          if (msg.helperRunning !== undefined) {
+            controllerState.helperRunning = Boolean(msg.helperRunning);
+          }
+          updateControllerPermissionBadge();
+        } else if (msg.type === 'chat') {
+          appendChatMessage({ senderName: msg.senderName || 'Partner', text: msg.text, self: false });
+        } else if (msg.type === 'end-session') {
+          endCurrentSession(true);
+        }
+      });
+
+      conn.on('close', () => {
+        if (conn._replaced || explicitlyEnded) return;
+        if (controllerState.connected) {
+          triggerControllerReconnect('Connection interrupted — Auto-reconnecting to partner...');
+        }
+      });
+
+      conn.on('error', () => {
+        if (conn._replaced || explicitlyEnded) return;
+        if (controllerState.connected) {
+          triggerControllerReconnect('Network glitch — Auto-reconnecting...');
+        }
+      });
+
+      setTimeout(() => {
+        const pc = conn.peerConnection;
+        if (!pc) return;
+        let iceTimer = null;
+        pc.addEventListener('iceconnectionstatechange', () => {
+          if (conn._replaced || explicitlyEnded || !controllerState.connected) return;
+          const st = pc.iceConnectionState;
+          if (st === 'connected' || st === 'completed') {
+            if (iceTimer) {
+              clearTimeout(iceTimer);
+              iceTimer = null;
+            }
+          } else if (st === 'failed') {
+            triggerControllerReconnect('Peer transport interrupted — reconnecting...');
+          } else if (st === 'disconnected') {
+            if (!iceTimer) {
+              iceTimer = setTimeout(() => {
+                if (!conn._replaced && !explicitlyEnded && controllerState.connected && pc.iceConnectionState === 'disconnected') {
+                  triggerControllerReconnect('Re-establishing peer connection...');
+                }
+              }, 4000);
+            }
+          }
+        });
+      }, 50);
+    }
   }
 
   joinSessionForm.addEventListener('submit', (e) => {
@@ -945,7 +1236,17 @@
     const conn = ctrlPeer.connect(PEER_PREFIX_HOST + cleanId, { reliable: true });
     setupControllerDataConnection(conn);
 
+    const openTimeout = setTimeout(() => {
+      if (!conn.open && !controllerState.connected) {
+        requestJoinBtn.disabled = false;
+        waitingApprovalBanner.classList.add('hidden');
+        controllerErrorBox.textContent = 'Connection timed out. Make sure your partner has Prashnaa open.';
+        controllerErrorBox.classList.remove('hidden');
+      }
+    }, 9000);
+
     conn.on('open', () => {
+      clearTimeout(openTimeout);
       conn.send({
         type: 'join-request',
         pin: cleanPin,
@@ -955,6 +1256,7 @@
     });
 
     conn.on('error', () => {
+      clearTimeout(openTimeout);
       requestJoinBtn.disabled = false;
       waitingApprovalBanner.classList.add('hidden');
       controllerErrorBox.textContent = 'Could not reach Session ID.';
@@ -967,7 +1269,7 @@
       controllerPermissionBadge.textContent = '👁️ View-Only (Partner Paused Control)';
       controllerPermissionBadge.className = 'badge badge-info';
     } else if (!controllerState.helperRunning) {
-      controllerPermissionBadge.textContent = '⚠️ Screen View Only — Partner Needs to Open Helper.exe';
+      controllerPermissionBadge.textContent = '⚠️ Screen View Only — Partner Needs Helper.exe Open';
       controllerPermissionBadge.className = 'badge badge-control';
     } else {
       controllerPermissionBadge.textContent = '🟢 Full Mouse & File Control Active';
@@ -1020,9 +1322,8 @@
   function sendRemoteInput(event) {
     if (!controllerState.connected || !activeDataConn || !activeDataConn.open) return;
 
-    // Prevent WebRTC SCTP DataChannel buffer overflow during rapid pointer movement
     if (
-      event.type === 'pointer-move' &&
+      (event.type === 'pointer-move' || event.type === 'mouse-scroll') &&
       activeDataConn.dataChannel &&
       activeDataConn.dataChannel.bufferedAmount > 32768
     ) {
@@ -1116,12 +1417,24 @@
 
   remoteScreenWrapper.addEventListener('contextmenu', (e) => e.preventDefault());
 
+  let accumulatedWheelDelta = 0;
+  let wheelFlushTimer = null;
   remoteScreenWrapper.addEventListener(
     'wheel',
     (e) => {
       if (!controllerState.allowControl) return;
       e.preventDefault();
-      sendRemoteInput({ type: 'mouse-scroll', deltaY: e.deltaY });
+      accumulatedWheelDelta += e.deltaY;
+      if (!wheelFlushTimer) {
+        wheelFlushTimer = setTimeout(() => {
+          const deltaY = accumulatedWheelDelta;
+          accumulatedWheelDelta = 0;
+          wheelFlushTimer = null;
+          if (deltaY !== 0) {
+            sendRemoteInput({ type: 'mouse-scroll', deltaY });
+          }
+        }, 35);
+      }
     },
     { passive: false }
   );
@@ -1131,21 +1444,17 @@
     if (document.activeElement === quickTypeInput || document.activeElement === chatInput) return;
 
     e.preventDefault();
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
-      sendRemoteInput({ type: 'hotkey', action: 'copy' });
-      return;
-    }
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
-      sendRemoteInput({ type: 'hotkey', action: 'paste' });
-      return;
-    }
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
-      sendRemoteInput({ type: 'hotkey', action: 'select-all' });
-      return;
-    }
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
-      sendRemoteInput({ type: 'hotkey', action: 'undo' });
-      return;
+    if (e.ctrlKey || e.metaKey) {
+      const k = e.key.toLowerCase();
+      if (k === 'c') { sendRemoteInput({ type: 'hotkey', action: 'copy' }); return; }
+      if (k === 'v') { sendRemoteInput({ type: 'hotkey', action: 'paste' }); return; }
+      if (k === 'x') { sendRemoteInput({ type: 'hotkey', action: 'cut' }); return; }
+      if (k === 'a') { sendRemoteInput({ type: 'hotkey', action: 'select-all' }); return; }
+      if (k === 'z') { sendRemoteInput({ type: 'hotkey', action: 'undo' }); return; }
+      if (k === 'y') { sendRemoteInput({ type: 'hotkey', action: 'redo' }); return; }
+      if (k === 's') { sendRemoteInput({ type: 'hotkey', action: 'save' }); return; }
+      if (k === 'f') { sendRemoteInput({ type: 'hotkey', action: 'find' }); return; }
+      if (k === 'r') { sendRemoteInput({ type: 'hotkey', action: 'refresh' }); return; }
     }
 
     sendRemoteInput({ type: 'key-down', key: e.key, code: e.code });
@@ -1161,6 +1470,12 @@
   if (openExplorerBtn) {
     openExplorerBtn.addEventListener('click', () => {
       sendRemoteInput({ type: 'open-explorer' });
+    });
+  }
+
+  if (startMenuBtn) {
+    startMenuBtn.addEventListener('click', () => {
+      sendRemoteInput({ type: 'hotkey', action: 'start-menu' });
     });
   }
 
@@ -1223,10 +1538,23 @@
     }
   });
 
+  document.addEventListener('fullscreenchange', () => {
+    if (fullscreenBtn) {
+      fullscreenBtn.textContent = document.fullscreenElement ? '⛶ Exit Fullscreen' : '⛶ Fullscreen';
+    }
+  });
+
   function endCurrentSession(isExplicit = true) {
     explicitlyEnded = Boolean(isExplicit);
     stopControllerHeartbeat();
     hideReconnectBanner();
+    cancelPendingReconnectConn();
+    releaseTabKeepAwake();
+
+    if (hostReconnectTimer) {
+      clearTimeout(hostReconnectTimer);
+      hostReconnectTimer = null;
+    }
 
     if (activeDataConn) {
       activeDataConn._replaced = true;
