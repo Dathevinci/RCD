@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>RemoteAssist — Serverless WebRTC Remote Desktop (GitHub Pages)</title>
+  <title>Prashnaa — Consent-First Remote Desktop &amp; Live Support</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -11,8 +11,11 @@
     <div class="brand">
       <div class="brand-icon">🛡️</div>
       <div>
-        <h1>RemoteAssist</h1>
-        <p class="subtitle">Zero-Command WebRTC Remote Desktop &amp; Support</p>
+        <div class="brand-title-row">
+          <h1>Prashnaa</h1>
+          <span class="brand-version">v4 Turbo</span>
+        </div>
+        <p class="subtitle">Zero-Command WebRTC Remote Desktop &amp; Instant Support</p>
       </div>
     </div>
 
@@ -28,44 +31,65 @@
       </a>
     </div>
 
-    <div class="connection-pill">
-      <span class="dot online" id="serverDot"></span>
-      <span id="serverStatusText">Connecting Cloud P2P...</span>
+    <div class="topbar-right">
+      <div class="connection-pill">
+        <span class="dot online" id="serverDot"></span>
+        <span id="serverStatusText">Connecting P2P Cloud...</span>
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm" id="toggleChatTopBtn" title="Show or Hide Live Chat Sidebar">
+        💬 Chat <span class="badge badge-info hidden" id="chatUnreadBadge" style="padding:1px 6px;font-size:10px;">0</span>
+      </button>
     </div>
   </header>
 
-  <main class="workspace">
+  <main class="workspace" id="workspaceMain">
     <!-- ==================== CONTROLLER VIEW (DEFAULT) ==================== -->
     <section class="panel active" id="controllerView">
       <div class="connect-container" id="controllerConnectCard">
-        <!-- 1-Click Invite Box for Non-IT Partner -->
-        <div class="card connect-card" style="margin-bottom: 16px; border-color: rgba(16, 185, 129, 0.45);">
+        <!-- Option 1: 1-Click Invite Box for Non-IT Partner -->
+        <div class="card card-featured connect-card">
           <div class="card-header">
-            <h2>✨ 1-Click Partner Link (No Typing Needed)</h2>
-            <span class="badge badge-shield">Works on GitHub Pages</span>
+            <h2>✨ 1-Click Partner Link (Recommended)</h2>
+            <span class="badge badge-shield">Auto-Reconnect Enabled</span>
           </div>
           <p class="muted-text">
-            Copy and send this link to your partner. Make sure they download the updated <strong>Mouse Helper v2</strong> on that page and choose <strong>"Entire Screen"</strong> when sharing!
+            Send this link to your partner. When they open it, they simply click <strong>Allow &amp; Share Entire Screen</strong> — no codes to type!
           </p>
+
           <div class="inline-input">
             <input type="text" id="partnerInviteLinkInput" readonly value="Generating 1-click link..." />
-            <button type="button" class="btn btn-primary" id="copyInviteLinkBtn" style="white-space: nowrap;">
+            <button type="button" class="btn btn-success" id="copyInviteLinkBtn" style="white-space: nowrap;">
               📋 Copy Partner Link
             </button>
+            <button type="button" class="btn btn-secondary btn-sm" id="newInviteLinkBtn" title="Generate a new room link" style="padding: 10px 11px;">
+              🔄
+            </button>
           </div>
+
+          <div class="steps-mini-list">
+            <div class="steps-mini-item">
+              <span class="step-num-pill">1</span>
+              <span>Partner opens your link &amp; runs <strong>RemoteAssist-Helper.exe</strong> (for mouse &amp; file control).</span>
+            </div>
+            <div class="steps-mini-item">
+              <span class="step-num-pill">2</span>
+              <span>Partner clicks <strong>Share Entire Screen</strong> — your screen connects here automatically!</span>
+            </div>
+          </div>
+
           <p class="small-muted" id="inviteWaitStatus">
             🟢 Waiting for your partner to open the link and click Allow...
           </p>
         </div>
 
-        <!-- Manual Code Box -->
+        <!-- Option 2: Manual Code Box -->
         <div class="card connect-card">
           <div class="card-header">
-            <h2>Or Connect with Partner's 6-Digit Code</h2>
+            <h2>🔐 Connect via 6-Digit Session Code</h2>
             <span class="badge badge-info">Manual Code</span>
           </div>
           <p class="muted-text">
-            If your partner opened the page on their own, enter the 6-digit Session ID and 4-digit PIN shown on their screen.
+            If your partner opened Prashnaa on their own, enter the 6-digit Session ID and 4-digit PIN displayed on their screen.
           </p>
 
           <form id="joinSessionForm" class="connect-form">
@@ -75,7 +99,8 @@
                 <input
                   type="text"
                   id="remoteSessionIdInput"
-                  placeholder="e.g. 482-910"
+                  class="code-input"
+                  placeholder="482-910"
                   maxlength="7"
                   required
                   autocomplete="off"
@@ -86,7 +111,8 @@
                 <input
                   type="text"
                   id="remotePinInput"
-                  placeholder="e.g. 7391"
+                  class="code-input"
+                  placeholder="7391"
                   maxlength="4"
                   required
                   autocomplete="off"
@@ -95,7 +121,7 @@
             </div>
 
             <div class="form-group">
-              <label for="controllerNameInput">Your Name (Shown on Partner's Approval Popup)</label>
+              <label for="controllerNameInput">Your Name (Shown on Partner's Screen)</label>
               <input
                 type="text"
                 id="controllerNameInput"
@@ -108,13 +134,13 @@
 
             <label class="checkbox-row">
               <input type="checkbox" id="requestControlCheckbox" checked />
-              <span>Request Mouse &amp; Keyboard Control</span>
+              <span>Request Full Mouse &amp; Keyboard Control</span>
             </label>
 
             <div class="form-error hidden" id="controllerErrorBox"></div>
 
             <button type="submit" class="btn btn-primary btn-block" id="requestJoinBtn">
-              🔗 Request Permission to Connect
+              🔗 Connect to Partner's Laptop
             </button>
           </form>
 
@@ -123,7 +149,7 @@
             <div>
               <strong>Waiting for Partner's Permission...</strong>
               <p class="small-muted">
-                Ask your partner to click <strong>Approve</strong> on their screen.
+                Ask your partner to click <strong>Approve</strong> and select <strong>Entire Screen</strong>.
               </p>
             </div>
           </div>
@@ -134,47 +160,69 @@
       <div class="remote-desktop-shell hidden" id="remoteDesktopShell">
         <div class="remote-toolbar">
           <div class="toolbar-left">
-            <span class="pulse-dot"></span>
+            <span class="pulse-dot" id="connectionPulseDot"></span>
             <strong id="remoteHostTitle">Connected to Partner</strong>
+            <span class="latency-pill" id="latencyBadge" title="Live Peer-to-Peer Roundtrip Latency">⚡ -- ms</span>
             <span class="badge" id="controllerPermissionBadge">View-Only Mode</span>
           </div>
 
           <div class="toolbar-right">
-            <button class="btn btn-primary btn-sm" id="showDesktopBtn" title="Minimize windows on partner's laptop to show their Desktop icons & files">
-              🖥️ Show Desktop
-            </button>
-            <button class="btn btn-primary btn-sm" id="openExplorerBtn" title="Open Windows File Explorer on partner's laptop">
-              📁 Open File Explorer
-            </button>
-            <label class="toolbar-switch" title="When checked, a single click on your screen sends a Double-Click to easily open folders & files!">
-              <input type="checkbox" id="singleClickDblToggle" />
-              <span>⚡ 1-Click = Double-Click</span>
-            </label>
-            <button class="btn btn-secondary btn-sm" id="sendEnterBtn" title="Press Enter on partner's laptop to open the selected file/folder">
-              📂 Open (Enter)
-            </button>
-            <button class="btn btn-secondary btn-sm" id="sendRightClickBtn" title="Right-click at current cursor position">
-              🖱️ Right-Click
-            </button>
-            <label class="toolbar-switch" title="Forward keyboard keystrokes when screen is focused">
-              <input type="checkbox" id="captureKeyboardToggle" checked />
-              <span>⌨️ Keyboard</span>
-            </label>
-            <button class="btn btn-secondary btn-sm" id="fullscreenBtn">⛶ Fullscreen</button>
-            <button class="btn btn-danger btn-sm" id="controllerDisconnectBtn">Disconnect</button>
+            <div class="toolbar-group">
+              <button type="button" class="btn btn-primary btn-sm" id="showDesktopBtn" title="Minimize windows on partner's laptop to show their Desktop icons & files (Win+D)">
+                🖥️ Desktop
+              </button>
+              <button type="button" class="btn btn-primary btn-sm" id="openExplorerBtn" title="Open Windows File Explorer on partner's laptop">
+                📁 Explorer
+              </button>
+            </div>
+
+            <div class="toolbar-group">
+              <label class="toolbar-switch" title="When checked, a single left-click sends a crisp Double-Click to easily open folders & files!">
+                <input type="checkbox" id="singleClickDblToggle" />
+                <span>⚡ 1-Click = Open</span>
+              </label>
+              <button type="button" class="btn btn-secondary btn-sm" id="sendEnterBtn" title="Press Enter on partner's laptop to open the selected file/folder">
+                📂 Enter
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" id="sendRightClickBtn" title="Right-click at current cursor position">
+                🖱️ Right-Click
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" id="sendCopyBtn" title="Send Ctrl+C (Copy) to partner's laptop">
+                📋 Copy
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" id="sendPasteBtn" title="Send Ctrl+V (Paste) to partner's laptop">
+                📥 Paste
+              </button>
+            </div>
+
+            <div class="toolbar-group">
+              <label class="toolbar-switch" title="Forward keyboard keystrokes when screen is focused">
+                <input type="checkbox" id="captureKeyboardToggle" checked />
+                <span>⌨️ Keys</span>
+              </label>
+              <button type="button" class="btn btn-secondary btn-sm" id="refreshStreamBtn" title="Reconnect & refresh video stream without ending session">
+                🔄 Refresh
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" id="fullscreenBtn" title="Toggle Fullscreen">
+                ⛶ Fullscreen
+              </button>
+              <button type="button" class="btn btn-danger btn-sm" id="controllerDisconnectBtn">
+                Disconnect
+              </button>
+            </div>
           </div>
         </div>
 
         <!-- Quick Type Bar for easy typing & commands -->
-        <form id="quickTypeForm" class="inline-input" style="margin-bottom: 4px;">
+        <form id="quickTypeForm" class="inline-input" style="margin-bottom: 2px;">
           <input
             type="text"
             id="quickTypeInput"
-            placeholder="⌨️ Type text here to send directly to partner's laptop (e.g. file name, search, URL)..."
+            placeholder="⌨️ Quick Type: Type text, URLs, or searches here and press Enter to send directly to partner's laptop..."
             autocomplete="off"
           />
           <button type="submit" class="btn btn-primary btn-sm" style="white-space: nowrap;">
-            Type Text
+            Send Text
           </button>
           <button type="button" class="btn btn-secondary btn-sm" id="sendBackspaceBtn" title="Send Backspace">
             ⌫ Backspace
@@ -185,12 +233,19 @@
         </form>
 
         <div class="remote-Screen-wrapper" id="remoteScreenWrapper" tabindex="0">
+          <!-- Floating Auto-Reconnect Banner -->
+          <div class="reconnect-floating-banner hidden" id="reconnectBanner">
+            <div class="spinner" style="width:18px;height:18px;border-width:2px;"></div>
+            <span id="reconnectStatusText">Connection interrupted — Auto-reconnecting to partner...</span>
+            <button type="button" class="btn btn-primary btn-sm" id="reconnectNowBtn">Reconnect Now</button>
+          </div>
+
           <video id="remoteScreenVideo" autoplay playsinline></video>
           <div class="laser-layer" id="remoteLaserLayer"></div>
           <div class="stage-placeholder" id="remoteVideoPlaceholder">
             <div class="spinner"></div>
             <h3>Receiving Partner's Screen Stream...</h3>
-            <p>Connecting direct peer-to-peer WebRTC video...</p>
+            <p>Establishing direct peer-to-peer WebRTC video stream...</p>
           </div>
         </div>
       </div>
@@ -202,10 +257,10 @@
         <div class="card credentials-card">
           <div class="card-header">
             <h2>1. Your Session Code &amp; PIN</h2>
-            <span class="badge badge-shield">Permission Required</span>
+            <span class="badge badge-shield">Consent Protected</span>
           </div>
           <p class="muted-text">
-            Share this code with your partner, or open the <a href="partner.html" style="color:#60a5fa;">Simple 1-Button Partner Page</a>.
+            Share this code with your partner, or use the <a href="partner.html" style="color:#60a5fa;font-weight:600;">Simple 1-Button Partner Page</a>.
           </p>
 
           <div class="cred-box-row">
@@ -213,7 +268,7 @@
               <label>SESSION ID</label>
               <div class="cred-value-row">
                 <span class="mono-code" id="hostSessionId">--- ---</span>
-                <button class="icon-btn" id="copySessionBtn">Copy</button>
+                <button type="button" class="icon-btn" id="copySessionBtn">Copy</button>
               </div>
             </div>
 
@@ -221,7 +276,7 @@
               <label>SECURITY PIN</label>
               <div class="cred-value-row">
                 <span class="mono-code pin-code" id="hostPin">----</span>
-                <button class="icon-btn" id="rotatePinBtn">Rotate</button>
+                <button type="button" class="icon-btn" id="rotatePinBtn">Rotate</button>
               </div>
             </div>
           </div>
@@ -236,7 +291,7 @@
             <div>
               <strong>Allow Remote Mouse &amp; Keyboard Control</strong>
               <p class="small-muted">
-                You can turn this OFF at any instant.
+                You can toggle this OFF at any instant.
               </p>
             </div>
             <label class="switch">
@@ -248,13 +303,13 @@
           <div class="agent-status-box">
             <div class="agent-status-header">
               <span class="dot" id="agentDot"></span>
-              <strong id="agentStatusTitle">Windows Mouse Helper: Checking...</strong>
+              <strong id="agentStatusTitle">Prashnaa Mouse Helper: Checking...</strong>
             </div>
             <p class="small-muted" id="agentStatusDesc">
-              To let your partner open files, double-click &amp; type without CMD, download and open the Windows Helper v2 below:
+              To let your partner click, open files, and type without CMD, download and open the Prashnaa Helper v4 below:
             </p>
             <a href="RemoteAssist-Helper.exe" download="RemoteAssist-Helper.exe" class="btn btn-secondary btn-sm" id="downloadHelperBtn">
-              ⬇️ Download Windows Mouse Helper v2 (15 KB — No CMD)
+              ⬇️ Download Prashnaa Mouse Helper v4 (16 KB — No CMD)
             </a>
           </div>
 
@@ -266,7 +321,7 @@
                 <p class="small-muted" id="connectedModeLabel">Mode: Active</p>
               </div>
             </div>
-            <button class="btn btn-danger" id="hostDisconnectBtn">
+            <button type="button" class="btn btn-danger" id="hostDisconnectBtn">
               🛑 Stop Session Now
             </button>
           </div>
@@ -275,7 +330,7 @@
         <div class="card preview-card">
           <div class="card-header">
             <h2>Shared Screen &amp; Remote Cursor Monitor</h2>
-            <button class="btn btn-primary btn-sm" id="changeScreenBtn">
+            <button type="button" class="btn btn-primary btn-sm" id="changeScreenBtn">
               📺 Select / Change Shared Screen
             </button>
           </div>
@@ -296,7 +351,7 @@
           <div class="audit-log-box">
             <div class="audit-header">
               <span>📋 Live Security &amp; Session Log</span>
-              <button class="link-btn" id="clearLogBtn">Clear</button>
+              <button type="button" class="link-btn" id="clearLogBtn">Clear</button>
             </div>
             <ul class="audit-list" id="auditLogList"></ul>
           </div>
@@ -305,14 +360,15 @@
     </section>
 
     <!-- ==================== CHAT DRAWER ==================== -->
-    <aside class="chat-sidebar">
+    <aside class="chat-sidebar" id="chatSidebar">
       <div class="card chat-card">
         <div class="card-header">
           <h2>💬 Live Chat &amp; Notes</h2>
+          <button type="button" class="link-btn" id="closeChatBtn" title="Collapse chat sidebar for full-width screen view">Hide</button>
         </div>
         <div class="chat-messages" id="chatMessages">
           <div class="chat-empty">
-            Send messages or links to your partner here once connected.
+            Send messages, links, or notes to your partner here during your session.
           </div>
         </div>
         <form id="chatForm" class="chat-input-row">
@@ -327,7 +383,7 @@
   <div class="modal-backdrop hidden" id="consentModal">
     <div class="modal-card">
       <div class="modal-icon">🔐</div>
-      <h2>Incoming Remote Support Request</h2>
+      <h2>Incoming Prashnaa Support Request</h2>
       <p class="modal-subtitle">
         <strong id="requesterNameLabel">Your Partner</strong> is asking for permission to connect to your laptop.
       </p>
@@ -344,13 +400,13 @@
       </div>
 
       <div class="modal-actions">
-        <button class="btn btn-primary" id="approveFullBtn">
+        <button type="button" class="btn btn-primary" id="approveFullBtn">
           ✅ Approve (Screen + Control)
         </button>
-        <button class="btn btn-secondary" id="approveViewOnlyBtn">
+        <button type="button" class="btn btn-secondary" id="approveViewOnlyBtn">
           👁️ Approve View-Only
         </button>
-        <button class="btn btn-danger-outline" id="declineRequestBtn">
+        <button type="button" class="btn btn-danger-outline" id="declineRequestBtn">
           ✖ Decline
         </button>
       </div>

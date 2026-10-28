@@ -1,7 +1,7 @@
 {
-  "name": "remote-assist",
-  "version": "1.0.0",
-  "description": "Consent-first WebRTC Remote Desktop & Assistance tool with live screen sharing, remote cursor HUD, chat, and opt-in OS mouse/keyboard control.",
+  "name": "prashnaa",
+  "version": "4.0.0",
+  "description": "Prashnaa — Consent-first WebRTC Remote Desktop & Live Support tool with auto-reconnect, live screen sharing, remote cursor HUD, chat, and opt-in OS mouse/keyboard control.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

@@ -33,65 +33,81 @@ namespace RemoteAssist
         private const uint MOUSEEVENTF_WHEEL      = 0x0800;
 
         private const uint KEYEVENTF_KEYUP = 0x0002;
-        private const byte VK_RETURN = 0x0D;
-        private const byte VK_BACK   = 0x08;
-        private const byte VK_TAB    = 0x09;
-        private const byte VK_ESCAPE = 0x1B;
-        private const byte VK_SPACE  = 0x20;
-        private const byte VK_LEFT   = 0x25;
-        private const byte VK_UP     = 0x26;
-        private const byte VK_RIGHT  = 0x27;
-        private const byte VK_DOWN   = 0x28;
-        private const byte VK_DELETE = 0x2E;
-        private const byte VK_LWIN   = 0x5B;
-        private const byte VK_D      = 0x44;
-        private const byte VK_E      = 0x45;
+        private const byte VK_RETURN  = 0x0D;
+        private const byte VK_BACK    = 0x08;
+        private const byte VK_TAB     = 0x09;
+        private const byte VK_ESCAPE  = 0x1B;
+        private const byte VK_SPACE   = 0x20;
+        private const byte VK_LEFT    = 0x25;
+        private const byte VK_UP      = 0x26;
+        private const byte VK_RIGHT   = 0x27;
+        private const byte VK_DOWN    = 0x28;
+        private const byte VK_DELETE  = 0x2E;
+        private const byte VK_LWIN    = 0x5B;
+        private const byte VK_CONTROL = 0x11;
+        private const byte VK_MENU    = 0x12; // Alt
+        private const byte VK_A       = 0x41;
+        private const byte VK_C       = 0x43;
+        private const byte VK_D       = 0x44;
+        private const byte VK_E       = 0x45;
+        private const byte VK_V       = 0x56;
+        private const byte VK_Z       = 0x5A;
 
         private HttpListener listener;
         private Thread serverThread;
         private volatile bool isRunning = true;
         private volatile bool allowOsControl = true;
+        private long commandCount = 0;
 
         private Label statusLabel;
+        private Label statsLabel;
         private CheckBox allowCheckBox;
         private Button stopButton;
 
         public HelperForm()
         {
-            this.Text = "RemoteAssist — Full Control Helper (v3)";
-            this.Size = new Size(360, 215);
+            this.Text = "Prashnaa — Full Control Helper (v4)";
+            this.Size = new Size(375, 238);
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
             this.MaximizeBox = false;
             this.TopMost = true;
-            this.BackColor = Color.FromArgb(19, 27, 46);
-            this.ForeColor = Color.White;
+            this.BackColor = Color.FromArgb(15, 23, 42);
+            this.ForeColor = Color.FromArgb(241, 245, 249);
             this.Font = new Font("Segoe UI", 9.5F, FontStyle.Regular);
 
-            // Position neatly in bottom-right corner above taskbar so it doesn't block the screen
+            // Position neatly in bottom-right corner above taskbar
             Rectangle workArea = Screen.PrimaryScreen.WorkingArea;
             this.StartPosition = FormStartPosition.Manual;
             this.Location = new Point(workArea.Right - this.Width - 16, workArea.Bottom - this.Height - 16);
 
             Label titleLabel = new Label();
-            titleLabel.Text = "🛡️ Full Control Helper Active";
+            titleLabel.Text = "🛡️ Prashnaa — Full Control Helper";
             titleLabel.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
             titleLabel.Location = new Point(16, 12);
-            titleLabel.Size = new Size(320, 24);
+            titleLabel.Size = new Size(335, 24);
             this.Controls.Add(titleLabel);
 
             statusLabel = new Label();
             statusLabel.Text = "🟢 Ready — Partner can control mouse & open files";
             statusLabel.ForeColor = Color.FromArgb(52, 211, 153);
             statusLabel.Location = new Point(16, 38);
-            statusLabel.Size = new Size(325, 22);
+            statusLabel.Size = new Size(340, 20);
             this.Controls.Add(statusLabel);
+
+            statsLabel = new Label();
+            statsLabel.Text = "Local Bridge: 127.0.0.1:3847 (Keep-Alive Active)";
+            statsLabel.ForeColor = Color.FromArgb(148, 163, 184);
+            statsLabel.Font = new Font("Segoe UI", 8.25F, FontStyle.Regular);
+            statsLabel.Location = new Point(16, 58);
+            statsLabel.Size = new Size(340, 18);
+            this.Controls.Add(statsLabel);
 
             allowCheckBox = new CheckBox();
             allowCheckBox.Text = "Allow Partner Full Mouse && Keyboard Control";
             allowCheckBox.Checked = true;
             allowCheckBox.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
-            allowCheckBox.Location = new Point(18, 66);
-            allowCheckBox.Size = new Size(320, 28);
+            allowCheckBox.Location = new Point(18, 82);
+            allowCheckBox.Size = new Size(330, 26);
             allowCheckBox.CheckedChanged += (s, e) => {
                 allowOsControl = allowCheckBox.Checked;
                 UpdateStatusText();
@@ -99,19 +115,27 @@ namespace RemoteAssist
             this.Controls.Add(allowCheckBox);
 
             stopButton = new Button();
-            stopButton.Text = "🛑 STOP && CLOSE HELPER NOW";
-            stopButton.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
+            stopButton.Text = "🛑 STOP && CLOSE PRASHNAA HELPER";
+            stopButton.Font = new Font("Segoe UI", 9.75F, FontStyle.Bold);
             stopButton.BackColor = Color.FromArgb(239, 68, 68);
             stopButton.ForeColor = Color.White;
             stopButton.FlatStyle = FlatStyle.Flat;
             stopButton.FlatAppearance.BorderSize = 0;
-            stopButton.Location = new Point(16, 106);
-            stopButton.Size = new Size(312, 46);
+            stopButton.Location = new Point(16, 120);
+            stopButton.Size = new Size(326, 44);
             stopButton.Cursor = Cursors.Hand;
             stopButton.Click += (s, e) => {
                 this.Close();
             };
             this.Controls.Add(stopButton);
+
+            Label footerLabel = new Label();
+            footerLabel.Text = "Keep this small window open or minimized while sharing.";
+            footerLabel.ForeColor = Color.FromArgb(100, 116, 139);
+            footerLabel.Font = new Font("Segoe UI", 8F, FontStyle.Regular);
+            footerLabel.Location = new Point(16, 170);
+            footerLabel.Size = new Size(330, 18);
+            this.Controls.Add(footerLabel);
 
             this.FormClosing += (s, e) => {
                 isRunning = false;
@@ -140,27 +164,65 @@ namespace RemoteAssist
             }
         }
 
+        private void CleanupExistingInstances()
+        {
+            try
+            {
+                int currentId = Process.GetCurrentProcess().Id;
+                string currentName = Process.GetCurrentProcess().ProcessName;
+                Process[] procs = Process.GetProcessesByName(currentName);
+                foreach (Process p in procs)
+                {
+                    if (p.Id != currentId)
+                    {
+                        try { p.Kill(); p.WaitForExit(500); } catch { }
+                    }
+                }
+            }
+            catch { }
+        }
+
         private void StartLocalServer()
         {
             serverThread = new Thread(() => {
-                try
-                {
-                    listener = new HttpListener();
-                    listener.Prefixes.Add("http://127.0.0.1:3847/");
-                    listener.Start();
+                CleanupExistingInstances();
 
-                    while (isRunning && listener.IsListening)
+                while (isRunning)
+                {
+                    try
                     {
+                        if (listener == null || !listener.IsListening)
+                        {
+                            try { if (listener != null) listener.Close(); } catch { }
+                            listener = new HttpListener();
+                            listener.IgnoreWriteExceptions = true;
+                            listener.Prefixes.Add("http://127.0.0.1:3847/");
+                            listener.Start();
+                        }
+
                         HttpListenerContext ctx = listener.GetContext();
                         ThreadPool.QueueUserWorkItem((c) => HandleRequest((HttpListenerContext)c), ctx);
                     }
-                }
-                catch
-                {
+                    catch
+                    {
+                        if (!isRunning) break;
+                        Thread.Sleep(250);
+                    }
                 }
             });
             serverThread.IsBackground = true;
             serverThread.Start();
+        }
+
+        private void SendJsonResponse(HttpListenerResponse res, string json, int statusCode)
+        {
+            byte[] buf = Encoding.UTF8.GetBytes(json);
+            res.StatusCode = statusCode;
+            res.ContentType = "application/json";
+            res.KeepAlive = true;
+            res.ContentLength64 = buf.Length;
+            res.OutputStream.Write(buf, 0, buf.Length);
+            res.Close();
         }
 
         private void HandleRequest(HttpListenerContext ctx)
@@ -178,49 +240,48 @@ namespace RemoteAssist
                 if (req.HttpMethod == "OPTIONS")
                 {
                     res.StatusCode = 204;
+                    res.KeepAlive = true;
+                    res.ContentLength64 = 0;
                     res.Close();
                     return;
                 }
 
                 Rectangle bounds = Screen.PrimaryScreen.Bounds;
+                string path = req.Url.AbsolutePath;
 
-                if (req.Url.AbsolutePath == "/status")
+                if (path == "/status")
                 {
                     string json = string.Format(
-                        "{{\"ok\":true,\"version\":3,\"allowControl\":{0},\"width\":{1},\"height\":{2}}}",
+                        "{{\"ok\":true,\"app\":\"Prashnaa\",\"version\":4,\"allowControl\":{0},\"width\":{1},\"height\":{2},\"commands\":{3}}}",
                         allowOsControl ? "true" : "false",
                         bounds.Width,
-                        bounds.Height
+                        bounds.Height,
+                        Interlocked.Read(ref commandCount)
                     );
-                    byte[] buf = Encoding.UTF8.GetBytes(json);
-                    res.ContentType = "application/json";
-                    res.ContentLength64 = buf.Length;
-                    res.OutputStream.Write(buf, 0, buf.Length);
-                    res.Close();
+                    SendJsonResponse(res, json, 200);
                     return;
                 }
 
-                if (req.Url.AbsolutePath == "/input" && req.HttpMethod == "POST")
+                if (path == "/input" && req.HttpMethod == "POST")
                 {
-                    if (allowOsControl)
+                    string body = "";
+                    using (StreamReader reader = new StreamReader(req.InputStream, Encoding.UTF8))
                     {
-                        using (StreamReader reader = new StreamReader(req.InputStream, Encoding.UTF8))
-                        {
-                            string body = reader.ReadToEnd();
-                            ExecuteInputCommand(body, bounds.Width, bounds.Height);
-                        }
+                        body = reader.ReadToEnd();
                     }
-                    byte[] buf = Encoding.UTF8.GetBytes("{\"ok\":true}");
-                    res.ContentType = "application/json";
-                    res.OutputStream.Write(buf, 0, buf.Length);
-                    res.Close();
+
+                    // Send HTTP response immediately so browser socket never blocks or queues up
+                    SendJsonResponse(res, "{\"ok\":true}", 200);
+
+                    if (allowOsControl && !string.IsNullOrEmpty(body))
+                    {
+                        Interlocked.Increment(ref commandCount);
+                        ExecuteInputCommand(body, bounds.Width, bounds.Height);
+                    }
                     return;
                 }
 
-                res.StatusCode = 200;
-                byte[] okBuf = Encoding.UTF8.GetBytes("{\"ok\":true}");
-                res.OutputStream.Write(okBuf, 0, okBuf.Length);
-                res.Close();
+                SendJsonResponse(res, "{\"ok\":true}", 200);
             }
             catch
             {
@@ -268,13 +329,13 @@ namespace RemoteAssist
                 if (btn == "right")
                 {
                     mouse_event(MOUSEEVENTF_RIGHTDOWN, x, y, 0, 0);
-                    Thread.Sleep(20);
+                    Thread.Sleep(18);
                     mouse_event(MOUSEEVENTF_RIGHTUP, x, y, 0, 0);
                 }
                 else
                 {
                     mouse_event(MOUSEEVENTF_LEFTDOWN, x, y, 0, 0);
-                    Thread.Sleep(20);
+                    Thread.Sleep(18);
                     mouse_event(MOUSEEVENTF_LEFTUP, x, y, 0, 0);
                 }
             }
@@ -283,7 +344,7 @@ namespace RemoteAssist
                 SetCursorPos(x, y);
                 mouse_event(MOUSEEVENTF_LEFTDOWN, x, y, 0, 0);
                 mouse_event(MOUSEEVENTF_LEFTUP, x, y, 0, 0);
-                Thread.Sleep(40);
+                Thread.Sleep(35);
                 SetCursorPos(x, y);
                 mouse_event(MOUSEEVENTF_LEFTDOWN, x, y, 0, 0);
                 mouse_event(MOUSEEVENTF_LEFTUP, x, y, 0, 0);
@@ -296,7 +357,6 @@ namespace RemoteAssist
             }
             else if (type == "show-desktop")
             {
-                // Win + D to show desktop icons/files immediately
                 keybd_event(VK_LWIN, 0, 0, 0);
                 keybd_event(VK_D, 0, 0, 0);
                 Thread.Sleep(20);
@@ -306,6 +366,11 @@ namespace RemoteAssist
             else if (type == "open-explorer")
             {
                 try { Process.Start("explorer.exe"); } catch { }
+            }
+            else if (type == "hotkey")
+            {
+                string action = ExtractString(json, "action");
+                ExecuteHotkey(action);
             }
             else if (type == "key-down")
             {
@@ -331,6 +396,40 @@ namespace RemoteAssist
                     }));
                 }
             }
+        }
+
+        private void ExecuteHotkey(string action)
+        {
+            if (string.IsNullOrEmpty(action)) return;
+            if (action == "copy")
+            {
+                TapChord(VK_CONTROL, VK_C);
+            }
+            else if (action == "paste")
+            {
+                TapChord(VK_CONTROL, VK_V);
+            }
+            else if (action == "select-all")
+            {
+                TapChord(VK_CONTROL, VK_A);
+            }
+            else if (action == "undo")
+            {
+                TapChord(VK_CONTROL, VK_Z);
+            }
+            else if (action == "alt-tab")
+            {
+                TapChord(VK_MENU, VK_TAB);
+            }
+        }
+
+        private void TapChord(byte modifierVk, byte keyVk)
+        {
+            keybd_event(modifierVk, 0, 0, 0);
+            keybd_event(keyVk, 0, 0, 0);
+            Thread.Sleep(18);
+            keybd_event(keyVk, 0, KEYEVENTF_KEYUP, 0);
+            keybd_event(modifierVk, 0, KEYEVENTF_KEYUP, 0);
         }
 
         private void TapVirtualKey(byte vk)
