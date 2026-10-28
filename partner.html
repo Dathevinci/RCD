@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Remote Support — Share Your Screen</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    body {
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      background: radial-gradient(circle at top, #172554 0%, #0b0f19 70%);
+    }
+    .simple-box {
+      max-width: 530px;
+      width: 100%;
+      background: #131b2e;
+      border: 1px solid #283655;
+      border-radius: 20px;
+      padding: 30px 26px;
+      text-align: center;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+    .big-icon {
+      font-size: 52px;
+      line-height: 1;
+    }
+    .simple-title {
+      font-size: 24px;
+      font-weight: 700;
+    }
+    .simple-desc {
+      font-size: 15px;
+      color: #cbd5e1;
+      line-height: 1.5;
+    }
+    .giant-btn {
+      width: 100%;
+      padding: 18px 20px;
+      font-size: 18px;
+      font-weight: 700;
+      border-radius: 14px;
+      border: none;
+      cursor: pointer;
+      transition: transform 0.12s ease, background 0.15s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+    .giant-btn:active {
+      transform: scale(0.98);
+    }
+    .btn-green {
+      background: #10b981;
+      color: #ffffff;
+      box-shadow: 0 8px 24px rgba(16, 185, 129, 0.35);
+    }
+    .btn-green:hover {
+      background: #059669;
+    }
+    .btn-stop {
+      background: #ef4444;
+      color: #ffffff;
+      box-shadow: 0 8px 24px rgba(239, 68, 68, 0.35);
+    }
+    .btn-stop:hover {
+      background: #dc2626;
+    }
+    .helper-step-box {
+      background: #0b0f19;
+      border: 1px solid #283655;
+      border-radius: 12px;
+      padding: 14px 16px;
+      text-align: left;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .control-switch-box {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #0b0f19;
+      border: 1px solid #283655;
+      padding: 13px 16px;
+      border-radius: 12px;
+      text-align: left;
+      gap: 12px;
+    }
+    .preview-mini {
+      position: relative;
+      background: #050811;
+      border-radius: 12px;
+      border: 1px solid #283655;
+      height: 220px;
+      overflow: hidden;
+    }
+    .preview-mini video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+  </style>
+</head>
+<body>
+  <div class="simple-box">
+    <!-- STEP 1: Ready to Share -->
+    <div id="stepReady">
+      <div class="big-icon">👋</div>
+      <h1 class="simple-title" style="margin-top: 10px;">Partner Screen Help</h1>
+      <p class="simple-desc" style="margin-top: 6px;">
+        Share your screen with your partner with 1 click. No CMD or technical setup needed!
+      </p>
+
+      <!-- Optional 1-Click Windows Mouse Helper (Zero CMD) -->
+      <div class="helper-step-box" style="margin: 16px 0;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span class="dot" id="partnerHelperDot"></span>
+            <strong style="font-size:13px;" id="partnerHelperTitle">Mouse Control Helper (Optional)</strong>
+          </div>
+          <span class="badge" id="partnerHelperBadge">Not Opened Yet</span>
+        </div>
+        <p class="small-muted" id="partnerHelperDesc">
+          If you want your partner to move your mouse &amp; click for you, click Download and open this tiny helper window:
+        </p>
+        <a href="RemoteAssist-Helper.exe" download="RemoteAssist-Helper.exe" class="btn btn-secondary btn-block" id="partnerDownloadBtn">
+          ⬇️ Download &amp; Open Mouse Helper (14 KB)
+        </a>
+      </div>
+
+      <button class="giant-btn btn-green" id="startSimpleShareBtn">
+        🟢 Allow &amp; Share My Screen
+      </button>
+
+      <div class="control-switch-box" style="margin-top: 14px;">
+        <div>
+          <strong style="font-size: 14px;">Allow Partner to Use Mouse &amp; Keyboard</strong>
+          <p class="small-muted">You can switch this off anytime</p>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="simpleAllowControl" checked />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <p class="small-muted" style="margin-top: 14px;" id="simpleCodeDisplay">
+        Connecting to cloud signaling...
+      </p>
+    </div>
+
+    <!-- STEP 2: Incoming Approval Popup -->
+    <div id="stepApprove" class="hidden">
+      <div class="big-icon">🔔</div>
+      <h1 class="simple-title" style="margin-top: 12px;">
+        <span id="simpleHelperName">Your Partner</span> Wants to Connect
+      </h1>
+      <p class="simple-desc" style="margin: 10px 0 20px;">
+        Do you give permission for them to view and help with your laptop now?
+      </p>
+
+      <button class="giant-btn btn-green" id="confirmApproveBtn">
+        ✅ Yes, Give Permission
+      </button>
+      <button class="btn btn-danger-outline btn-block" id="confirmDeclineBtn" style="margin-top: 10px;">
+        ✖ No, Decline
+      </button>
+    </div>
+
+    <!-- STEP 3: Active Session -->
+    <div id="stepActive" class="hidden">
+      <div class="big-icon">🟢</div>
+      <h1 class="simple-title" style="margin-top: 8px;">Screen Sharing is Active</h1>
+      <p class="simple-desc" style="margin-top: 4px;" id="activePartnerStatus">
+        Connected with your partner!
+      </p>
+
+      <div class="preview-mini" id="simpleVideoStage" style="margin: 16px 0;">
+        <video id="simplePreviewVideo" autoplay muted playsinline></video>
+        <div class="remote-cursor hidden" id="simpleRemoteCursor">
+          <div class="cursor-arrow"></div>
+          <span class="cursor-tag" id="simpleCursorTag">Partner</span>
+        </div>
+      </div>
+
+      <div class="control-switch-box" style="margin-bottom: 16px;">
+        <div>
+          <strong style="font-size: 14px;">Allow Mouse &amp; Keyboard Control</strong>
+          <p class="small-muted">Switch off if you only want them to watch</p>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="activeControlSwitch" checked />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <button class="giant-btn btn-stop" id="stopSimpleShareBtn">
+        🛑 STOP SHARING NOW
+      </button>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script src="partner.js"></script>
+</body>
+</html>

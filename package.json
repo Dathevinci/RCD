@@ -1,0 +1,15 @@
+{
+  "name": "remote-assist",
+  "version": "1.0.0",
+  "description": "Consent-first WebRTC Remote Desktop & Assistance tool with live screen sharing, remote cursor HUD, chat, and opt-in OS mouse/keyboard control.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "agent": "node host-agent.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1",
+    "ws": "^8.18.0"
+  }
+}

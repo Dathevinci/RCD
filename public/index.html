@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RemoteAssist — Serverless WebRTC Remote Desktop (GitHub Pages)</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-icon">🛡️</div>
+      <div>
+        <h1>RemoteAssist</h1>
+        <p class="subtitle">Zero-Command WebRTC Remote Desktop &amp; Support</p>
+      </div>
+    </div>
+
+    <div class="mode-tabs" id="modeTabs">
+      <button class="tab-btn active" data-mode="controller" id="tabController">
+        🎮 Control Partner's Laptop
+      </button>
+      <button class="tab-btn" data-mode="host" id="tabHost">
+        🖥️ Share This Laptop
+      </button>
+      <a class="tab-btn" href="partner.html" title="Open the ultra-simple 1-button Partner View">
+        👋 Simple Partner Page
+      </a>
+    </div>
+
+    <div class="connection-pill">
+      <span class="dot online" id="serverDot"></span>
+      <span id="serverStatusText">Connecting Cloud P2P...</span>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <!-- ==================== CONTROLLER VIEW (DEFAULT) ==================== -->
+    <section class="panel active" id="controllerView">
+      <div class="connect-container" id="controllerConnectCard">
+        <!-- 1-Click Invite Box for Non-IT Partner -->
+        <div class="card connect-card" style="margin-bottom: 16px; border-color: rgba(16, 185, 129, 0.45);">
+          <div class="card-header">
+            <h2>✨ 1-Click Partner Link (No Typing Needed)</h2>
+            <span class="badge badge-shield">Works on GitHub Pages</span>
+          </div>
+          <p class="muted-text">
+            Copy and send this link to your partner. They just click one green <strong>"Allow &amp; Share My Screen"</strong> button — no CMD, no codes to type!
+          </p>
+          <div class="inline-input">
+            <input type="text" id="partnerInviteLinkInput" readonly value="Generating 1-click link..." />
+            <button type="button" class="btn btn-primary" id="copyInviteLinkBtn" style="white-space: nowrap;">
+              📋 Copy Partner Link
+            </button>
+          </div>
+          <p class="small-muted" id="inviteWaitStatus">
+            🟢 Waiting for your partner to open the link and click Allow...
+          </p>
+        </div>
+
+        <!-- Manual Code Box -->
+        <div class="card connect-card">
+          <div class="card-header">
+            <h2>Or Connect with Partner's 6-Digit Code</h2>
+            <span class="badge badge-info">Manual Code</span>
+          </div>
+          <p class="muted-text">
+            If your partner opened the page on their own, enter the 6-digit Session ID and 4-digit PIN shown on their screen.
+          </p>
+
+          <form id="joinSessionForm" class="connect-form">
+            <div class="form-row-2">
+              <div class="form-group">
+                <label for="remoteSessionIdInput">6-Digit Session ID</label>
+                <input
+                  type="text"
+                  id="remoteSessionIdInput"
+                  placeholder="e.g. 482-910"
+                  maxlength="7"
+                  required
+                  autocomplete="off"
+                />
+              </div>
+              <div class="form-group">
+                <label for="remotePinInput">4-Digit PIN</label>
+                <input
+                  type="text"
+                  id="remotePinInput"
+                  placeholder="e.g. 7391"
+                  maxlength="4"
+                  required
+                  autocomplete="off"
+                />
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="controllerNameInput">Your Name (Shown on Partner's Approval Popup)</label>
+              <input
+                type="text"
+                id="controllerNameInput"
+                placeholder="e.g. Partner"
+                value="Your Partner"
+                maxlength="36"
+                required
+              />
+            </div>
+
+            <label class="checkbox-row">
+              <input type="checkbox" id="requestControlCheckbox" checked />
+              <span>Request Mouse &amp; Keyboard Control</span>
+            </label>
+
+            <div class="form-error hidden" id="controllerErrorBox"></div>
+
+            <button type="submit" class="btn btn-primary btn-block" id="requestJoinBtn">
+              🔗 Request Permission to Connect
+            </button>
+          </form>
+
+          <div class="waiting-banner hidden" id="waitingApprovalBanner">
+            <div class="spinner"></div>
+            <div>
+              <strong>Waiting for Partner's Permission...</strong>
+              <p class="small-muted">
+                Ask your partner to click <strong>Approve</strong> on their screen.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Active Remote Desktop Stage -->
+      <div class="remote-desktop-shell hidden" id="remoteDesktopShell">
+        <div class="remote-toolbar">
+          <div class="toolbar-left">
+            <span class="pulse-dot"></span>
+            <strong id="remoteHostTitle">Connected to Partner</strong>
+            <span class="badge" id="controllerPermissionBadge">View-Only Mode</span>
+          </div>
+
+          <div class="toolbar-right">
+            <label class="toolbar-switch" title="Forward keyboard keystrokes when screen is focused">
+              <input type="checkbox" id="captureKeyboardToggle" checked />
+              <span>⌨️ Send Keystrokes</span>
+            </label>
+            <button class="btn btn-secondary btn-sm" id="fullscreenBtn">⛶ Fullscreen</button>
+            <button class="btn btn-danger btn-sm" id="controllerDisconnectBtn">Disconnect</button>
+          </div>
+        </div>
+
+        <div class="remote-Screen-wrapper" id="remoteScreenWrapper" tabindex="0">
+          <video id="remoteScreenVideo" autoplay playsinline></video>
+          <div class="laser-layer" id="remoteLaserLayer"></div>
+          <div class="stage-placeholder" id="remoteVideoPlaceholder">
+            <div class="spinner"></div>
+            <h3>Receiving Partner's Screen Stream...</h3>
+            <p>Connecting direct peer-to-peer WebRTC video...</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== HOST VIEW ==================== -->
+    <section class="panel" id="hostView">
+      <div class="host-grid">
+        <div class="card credentials-card">
+          <div class="card-header">
+            <h2>1. Your Session Code &amp; PIN</h2>
+            <span class="badge badge-shield">Permission Required</span>
+          </div>
+          <p class="muted-text">
+            Share this code with your partner, or open the <a href="partner.html" style="color:#60a5fa;">Simple 1-Button Partner Page</a>.
+          </p>
+
+          <div class="cred-box-row">
+            <div class="cred-box">
+              <label>SESSION ID</label>
+              <div class="cred-value-row">
+                <span class="mono-code" id="hostSessionId">--- ---</span>
+                <button class="icon-btn" id="copySessionBtn">Copy</button>
+              </div>
+            </div>
+
+            <div class="cred-box">
+              <label>SECURITY PIN</label>
+              <div class="cred-value-row">
+                <span class="mono-code pin-code" id="hostPin">----</span>
+                <button class="icon-btn" id="rotatePinBtn">Rotate</button>
+              </div>
+            </div>
+          </div>
+
+          <hr class="divider" />
+
+          <div class="card-header">
+            <h2>2. Mouse &amp; Keyboard Control Permission</h2>
+          </div>
+
+          <div class="permission-toggle-card">
+            <div>
+              <strong>Allow Remote Mouse &amp; Keyboard Control</strong>
+              <p class="small-muted">
+                You can turn this OFF at any instant.
+              </p>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="allowControlToggle" checked />
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="agent-status-box">
+            <div class="agent-status-header">
+              <span class="dot" id="agentDot"></span>
+              <strong id="agentStatusTitle">Windows Mouse Helper: Checking...</strong>
+            </div>
+            <p class="small-muted" id="agentStatusDesc">
+              To let your partner move your mouse &amp; type without opening CMD, download and open the tiny Windows Helper app below:
+            </p>
+            <a href="RemoteAssist-Helper.exe" download="RemoteAssist-Helper.exe" class="btn btn-secondary btn-sm" id="downloadHelperBtn">
+              ⬇️ Download Windows Mouse Helper (14 KB — No CMD)
+            </a>
+          </div>
+
+          <div class="host-active-banner hidden" id="hostActiveBanner">
+            <div class="active-banner-info">
+              <span class="pulse-dot"></span>
+              <div>
+                <strong id="connectedControllerLabel">Connected to Partner</strong>
+                <p class="small-muted" id="connectedModeLabel">Mode: Active</p>
+              </div>
+            </div>
+            <button class="btn btn-danger" id="hostDisconnectBtn">
+              🛑 Stop Session Now
+            </button>
+          </div>
+        </div>
+
+        <div class="card preview-card">
+          <div class="card-header">
+            <h2>Shared Screen &amp; Remote Cursor Monitor</h2>
+            <button class="btn btn-primary btn-sm" id="changeScreenBtn">
+              📺 Select / Change Shared Screen
+            </button>
+          </div>
+
+          <div class="video-stage" id="hostVideoStage">
+            <video id="hostPreviewVideo" autoplay muted playsinline></video>
+            <div class="remote-cursor hidden" id="hostRemoteCursor">
+              <div class="cursor-arrow"></div>
+              <span class="cursor-tag" id="hostCursorTag">Partner</span>
+            </div>
+            <div class="stage-placeholder" id="hostStagePlaceholder">
+              <div class="placeholder-icon">🖥️</div>
+              <h3>No Screen Shared Yet</h3>
+              <p>When a connection request arrives and you click <strong>Approve</strong>, your browser will ask which screen you want to share.</p>
+            </div>
+          </div>
+
+          <div class="audit-log-box">
+            <div class="audit-header">
+              <span>📋 Live Security &amp; Session Log</span>
+              <button class="link-btn" id="clearLogBtn">Clear</button>
+            </div>
+            <ul class="audit-list" id="auditLogList"></ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== CHAT DRAWER ==================== -->
+    <aside class="chat-sidebar">
+      <div class="card chat-card">
+        <div class="card-header">
+          <h2>💬 Live Chat &amp; Notes</h2>
+        </div>
+        <div class="chat-messages" id="chatMessages">
+          <div class="chat-empty">
+            Send messages or links to your partner here once connected.
+          </div>
+        </div>
+        <form id="chatForm" class="chat-input-row">
+          <input type="text" id="chatInput" placeholder="Type a message..." autocomplete="off" />
+          <button type="submit" class="btn btn-primary btn-sm">Send</button>
+        </form>
+      </div>
+    </aside>
+  </main>
+
+  <!-- ==================== INCOMING CONSENT MODAL ==================== -->
+  <div class="modal-backdrop hidden" id="consentModal">
+    <div class="modal-card">
+      <div class="modal-icon">🔐</div>
+      <h2>Incoming Remote Support Request</h2>
+      <p class="modal-subtitle">
+        <strong id="requesterNameLabel">Your Partner</strong> is asking for permission to connect to your laptop.
+      </p>
+
+      <div class="modal-request-details">
+        <div class="detail-row">
+          <span>Requested Access:</span>
+          <strong id="requestedAccessLabel">Screen View + Mouse/Keyboard Control</strong>
+        </div>
+        <div class="detail-row">
+          <span>Your Safety Guarantee:</span>
+          <span>You can stop sharing at any second with 1 click.</span>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="approveFullBtn">
+          ✅ Approve (Screen + Control)
+        </button>
+        <button class="btn btn-secondary" id="approveViewOnlyBtn">
+          👁️ Approve View-Only
+        </button>
+        <button class="btn btn-danger-outline" id="declineRequestBtn">
+          ✖ Decline
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
