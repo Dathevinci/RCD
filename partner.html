@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Remote Support — Share Your Screen</title>
+  <title>Remote Support — Full Control Setup</title>
   <link rel="stylesheet" href="styles.css" />
   <style>
     body {
@@ -13,35 +13,35 @@
       background: radial-gradient(circle at top, #172554 0%, #0b0f19 70%);
     }
     .simple-box {
-      max-width: 540px;
+      max-width: 550px;
       width: 100%;
       background: #131b2e;
       border: 1px solid #283655;
       border-radius: 20px;
-      padding: 30px 26px;
+      padding: 28px 26px;
       text-align: center;
       box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
       display: flex;
       flex-direction: column;
-      gap: 18px;
+      gap: 16px;
     }
     .big-icon {
-      font-size: 52px;
+      font-size: 48px;
       line-height: 1;
     }
     .simple-title {
-      font-size: 24px;
+      font-size: 23px;
       font-weight: 700;
     }
     .simple-desc {
-      font-size: 15px;
+      font-size: 14px;
       color: #cbd5e1;
       line-height: 1.5;
     }
     .giant-btn {
       width: 100%;
-      padding: 18px 20px;
-      font-size: 18px;
+      padding: 16px 18px;
+      font-size: 17px;
       font-weight: 700;
       border-radius: 14px;
       border: none;
@@ -51,9 +51,18 @@
       align-items: center;
       justify-content: center;
       gap: 10px;
+      text-decoration: none;
     }
     .giant-btn:active {
       transform: scale(0.98);
+    }
+    .btn-blue {
+      background: #3b82f6;
+      color: #ffffff;
+      box-shadow: 0 8px 24px rgba(59, 130, 246, 0.35);
+    }
+    .btn-blue:hover {
+      background: #2563eb;
     }
     .btn-green {
       background: #10b981;
@@ -66,7 +75,7 @@
     .btn-warning {
       background: #f59e0b;
       color: #0b0f19;
-      margin-bottom: 12px;
+      box-shadow: 0 8px 24px rgba(245, 158, 11, 0.35);
     }
     .btn-stop {
       background: #ef4444;
@@ -76,15 +85,19 @@
     .btn-stop:hover {
       background: #dc2626;
     }
-    .helper-step-box {
+    .step-card {
       background: #0b0f19;
-      border: 1px solid #283655;
-      border-radius: 12px;
-      padding: 14px 16px;
+      border: 2px solid #3b82f6;
+      border-radius: 14px;
+      padding: 16px;
       text-align: left;
       display: flex;
       flex-direction: column;
       gap: 10px;
+    }
+    .step-card.done {
+      border-color: #10b981;
+      background: rgba(16, 185, 129, 0.08);
     }
     .control-switch-box {
       display: flex;
@@ -92,7 +105,7 @@
       justify-content: space-between;
       background: #0b0f19;
       border: 1px solid #283655;
-      padding: 13px 16px;
+      padding: 12px 16px;
       border-radius: 12px;
       text-align: left;
       gap: 12px;
@@ -102,7 +115,7 @@
       background: #050811;
       border-radius: 12px;
       border: 1px solid #283655;
-      height: 220px;
+      height: 180px;
       overflow: hidden;
     }
     .preview-mini video {
@@ -116,37 +129,38 @@
   <div class="simple-box">
     <!-- STEP 1: Ready to Share -->
     <div id="stepReady">
-      <div class="big-icon">👋</div>
-      <h1 class="simple-title" style="margin-top: 10px;">Partner Screen Help</h1>
-      <p class="simple-desc" style="margin-top: 6px;">
-        Follow the 2 simple steps below to let your partner view and control your laptop.
+      <div class="big-icon">🛠️</div>
+      <h1 class="simple-title" style="margin-top: 8px;">Full Laptop Control Setup</h1>
+      <p class="simple-desc" style="margin-top: 4px;">
+        Follow <strong>Step 1</strong> then <strong>Step 2</strong> below so your partner can control your mouse, open files, and help you.
       </p>
 
-      <!-- Step 1: 1-Click Windows Mouse Helper (Zero CMD) -->
-      <div class="helper-step-box" style="margin: 16px 0;">
+      <!-- STEP 1 CARD: MUST OPEN HELPER FOR FULL CONTROL -->
+      <div class="step-card" id="step1Card" style="margin: 14px 0;">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
           <div style="display:flex;align-items:center;gap:8px;">
             <span class="dot" id="partnerHelperDot"></span>
-            <strong style="font-size:13px;" id="partnerHelperTitle">Step 1: Open Mouse &amp; File Helper</strong>
+            <strong style="font-size:15px;" id="partnerHelperTitle">Step 1: Enable Mouse &amp; File Control</strong>
           </div>
-          <span class="badge" id="partnerHelperBadge">Not Opened Yet</span>
+          <span class="badge badge-control" id="partnerHelperBadge">Required for Full Control</span>
         </div>
-        <p class="small-muted" id="partnerHelperDesc">
-          Download and open this tiny helper window so your partner can click, open files/folders, and type for you:
+        <p class="small-muted" id="partnerHelperDesc" style="font-size:13px;color:#e2e8f0;">
+          Click the blue button below to download <strong>RemoteAssist-Helper.exe</strong>, then click <strong>"Open file"</strong> in your browser's top-right downloads list!
         </p>
-        <a href="RemoteAssist-Helper.exe" download="RemoteAssist-Helper.exe" class="btn btn-secondary btn-block" id="partnerDownloadBtn">
-          ⬇️ Download &amp; Open Mouse Helper v2 (15 KB)
+        <a href="RemoteAssist-Helper.exe" download="RemoteAssist-Helper.exe" class="giant-btn btn-blue" id="partnerDownloadBtn">
+          1️⃣ Download &amp; Open Full Control Helper
         </a>
       </div>
 
+      <!-- STEP 2 BUTTON -->
       <button class="giant-btn btn-green" id="startSimpleShareBtn">
-        🟢 Step 2: Allow &amp; Share Entire Screen
+        2️⃣ Allow &amp; Share Entire Screen
       </button>
       <p class="small-muted" style="margin-top: 8px; color: #93c5fd;">
-        💡 <strong>Important:</strong> In the browser popup, click the <strong>"Entire Screen"</strong> tab so your partner can see folders and files you open!
+        💡 In the popup, choose <strong>"Entire Screen"</strong> so your partner can see your desktop and files!
       </p>
 
-      <div class="control-switch-box" style="margin-top: 14px;">
+      <div class="control-switch-box" style="margin-top: 12px;">
         <div>
           <strong style="font-size: 14px;">Allow Partner to Use Mouse &amp; Keyboard</strong>
           <p class="small-muted">You can switch this off anytime</p>
@@ -157,7 +171,7 @@
         </label>
       </div>
 
-      <p class="small-muted" style="margin-top: 14px;" id="simpleCodeDisplay">
+      <p class="small-muted" style="margin-top: 10px;" id="simpleCodeDisplay">
         Connecting to cloud signaling...
       </p>
     </div>
@@ -169,7 +183,7 @@
         <span id="simpleHelperName">Your Partner</span> Wants to Connect
       </h1>
       <p class="simple-desc" style="margin: 10px 0 20px;">
-        Click Yes below, then select <strong>"Entire Screen"</strong> in the popup so they can see your desktop and files!
+        Click Yes below, then select <strong>"Entire Screen"</strong> in the popup!
       </p>
 
       <button class="giant-btn btn-green" id="confirmApproveBtn">
@@ -183,16 +197,27 @@
     <!-- STEP 3: Active Session -->
     <div id="stepActive" class="hidden">
       <div class="big-icon">🟢</div>
-      <h1 class="simple-title" style="margin-top: 8px;">Screen Sharing is Active</h1>
+      <h1 class="simple-title" style="margin-top: 6px;">Connected with Partner</h1>
       <p class="simple-desc" style="margin-top: 4px;" id="activePartnerStatus">
-        Connected with your partner!
+        Your screen is being shared.
       </p>
 
+      <!-- Warning if Helper EXE is NOT open while connected! -->
+      <a
+        href="RemoteAssist-Helper.exe"
+        download="RemoteAssist-Helper.exe"
+        class="giant-btn btn-warning"
+        id="activeMissingHelperBtn"
+        style="font-size:15px;padding:14px;margin-top:10px;"
+      >
+        ⚠️ Mouse Control Helper is NOT Open! Click here to Download &amp; Open "RemoteAssist-Helper.exe" so your partner can move your mouse &amp; open files!
+      </a>
+
       <button class="giant-btn btn-warning hidden" id="notEntireScreenWarningBtn" style="font-size:14px;padding:12px;margin-top:10px;">
-        ⚠️ You only shared 1 Tab/Window! Click here to switch to "Entire Screen" so your partner can see opened files
+        ⚠️ You only shared 1 Tab! Click here to switch to "Entire Screen"
       </button>
 
-      <div class="preview-mini" id="simpleVideoStage" style="margin: 14px 0;">
+      <div class="preview-mini" id="simpleVideoStage" style="margin: 12px 0;">
         <video id="simplePreviewVideo" autoplay muted playsinline></video>
         <div class="remote-cursor hidden" id="simpleRemoteCursor">
           <div class="cursor-arrow"></div>
@@ -200,7 +225,7 @@
         </div>
       </div>
 
-      <div class="control-switch-box" style="margin-bottom: 16px;">
+      <div class="control-switch-box" style="margin-bottom: 14px;">
         <div>
           <strong style="font-size: 14px;">Allow Mouse &amp; Keyboard Control</strong>
           <p class="small-muted">Switch off if you only want them to watch</p>

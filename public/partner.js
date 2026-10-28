@@ -18,10 +18,13 @@
   const stepApprove = document.getElementById('stepApprove');
   const stepActive = document.getElementById('stepActive');
 
+  const step1Card = document.getElementById('step1Card');
   const partnerHelperDot = document.getElementById('partnerHelperDot');
   const partnerHelperTitle = document.getElementById('partnerHelperTitle');
   const partnerHelperBadge = document.getElementById('partnerHelperBadge');
   const partnerHelperDesc = document.getElementById('partnerHelperDesc');
+  const partnerDownloadBtn = document.getElementById('partnerDownloadBtn');
+  const activeMissingHelperBtn = document.getElementById('activeMissingHelperBtn');
 
   const startSimpleShareBtn = document.getElementById('startSimpleShareBtn');
   const simpleAllowControl = document.getElementById('simpleAllowControl');
@@ -59,35 +62,43 @@
       const res = await fetch('http://127.0.0.1:3847/status');
       const data = await res.json();
       if (data && data.ok) {
+        const changed = !helperExeActive;
         helperExeActive = true;
+        if (step1Card) step1Card.classList.add('done');
         partnerHelperDot.className = 'dot online';
-        partnerHelperBadge.textContent = '🟢 Ready';
+        partnerHelperBadge.textContent = '✅ Connected';
         partnerHelperBadge.className = 'badge badge-shield';
-        partnerHelperTitle.textContent = 'Step 1: Mouse & File Helper Running!';
-        partnerHelperDesc.textContent = 'Awesome! Your partner can now click, open files/folders, and type when you click Step 2 below.';
-        syncHelperPermission();
+        partnerHelperTitle.textContent = 'Step 1 Complete: Full Control Helper Running!';
+        partnerHelperDesc.textContent = 'Awesome! Now click the green Step 2 button below to share your Entire Screen.';
+        if (partnerDownloadBtn) partnerDownloadBtn.classList.add('hidden');
+        if (activeMissingHelperBtn) activeMissingHelperBtn.classList.add('hidden');
+        if (changed) notifyControllerPermissions();
         return;
       }
     } catch {}
+
+    const changed = helperExeActive;
     helperExeActive = false;
+    if (step1Card) step1Card.classList.remove('done');
     partnerHelperDot.className = 'dot';
-    partnerHelperBadge.textContent = 'Required for Control';
-    partnerHelperBadge.className = 'badge';
+    partnerHelperBadge.textContent = 'Required for Full Control';
+    partnerHelperBadge.className = 'badge badge-control';
+    if (partnerDownloadBtn) partnerDownloadBtn.classList.remove('hidden');
+    if (activeMissingHelperBtn) activeMissingHelperBtn.classList.remove('hidden');
+    if (changed) notifyControllerPermissions();
   }
 
-  async function syncHelperPermission() {
-    try {
-      await fetch('http://127.0.0.1:3847/permission', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          allowControl: Boolean(sessionState.allowControl && sessionState.connected)
-        })
+  function notifyControllerPermissions() {
+    if (activeDataConn && activeDataConn.open) {
+      activeDataConn.send({
+        type: 'permissions-updated',
+        allowControl: sessionState.allowControl,
+        helperRunning: helperExeActive
       });
-    } catch {}
+    }
   }
 
-  setInterval(checkLocalHelperExe, 2500);
+  setInterval(checkLocalHelperExe, 1800);
   checkLocalHelperExe();
 
   function showStep(stepEl) {
@@ -184,7 +195,6 @@
       if (sessionState.allowControl && helperExeActive) {
         fetch('http://127.0.0.1:3847/input', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(ev)
         }).catch(() => {});
       }
@@ -207,14 +217,16 @@
 
       conn.on('open', () => {
         sessionState.connected = true;
-        syncHelperPermission();
         conn.send({
           type: 'partner-invite-ready',
           hostName: 'Partner Laptop',
-          allowControl: sessionState.allowControl
+          allowControl: sessionState.allowControl,
+          helperRunning: helperExeActive
         });
         activeMediaCall = peer.call(targetPeerId, stream);
-        activePartnerStatus.textContent = 'Connected! Your partner can now see your screen and help you.';
+        activePartnerStatus.textContent = helperExeActive
+          ? 'Full Control Active! Your partner can move your mouse and open files.'
+          : 'Screen shared! Open "RemoteAssist-Helper.exe" below to enable full mouse control.';
         showStep(stepActive);
       });
 
@@ -241,12 +253,12 @@
     activeDataConn = conn;
     sessionState.connected = true;
     sessionState.allowControl = activeControlSwitch.checked;
-    syncHelperPermission();
 
     conn.send({
       type: 'request-approved',
       hostName: 'Partner Laptop',
-      allowControl: sessionState.allowControl
+      allowControl: sessionState.allowControl,
+      helperRunning: helperExeActive
     });
 
     activeMediaCall = peer.call(conn.peer, stream);
@@ -267,18 +279,11 @@
 
   activeControlSwitch.addEventListener('change', () => {
     sessionState.allowControl = activeControlSwitch.checked;
-    syncHelperPermission();
-    if (activeDataConn && activeDataConn.open) {
-      activeDataConn.send({
-        type: 'permissions-updated',
-        allowControl: sessionState.allowControl
-      });
-    }
+    notifyControllerPermissions();
   });
 
   function stopSession() {
     sessionState.connected = false;
-    syncHelperPermission();
     if (activeDataConn && activeDataConn.open) {
       try {
         activeDataConn.send({ type: 'end-session' });

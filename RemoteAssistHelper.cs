@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Net;
@@ -42,6 +43,9 @@ namespace RemoteAssist
         private const byte VK_RIGHT  = 0x27;
         private const byte VK_DOWN   = 0x28;
         private const byte VK_DELETE = 0x2E;
+        private const byte VK_LWIN   = 0x5B;
+        private const byte VK_D      = 0x44;
+        private const byte VK_E      = 0x45;
 
         private HttpListener listener;
         private Thread serverThread;
@@ -50,63 +54,59 @@ namespace RemoteAssist
 
         private Label statusLabel;
         private CheckBox allowCheckBox;
-        private Label logLabel;
         private Button stopButton;
 
         public HelperForm()
         {
-            this.Text = "RemoteAssist — Mouse & Keyboard Permission";
-            this.Size = new Size(430, 300);
-            this.StartPosition = FormStartPosition.CenterScreen;
+            this.Text = "RemoteAssist — Full Control Helper (v3)";
+            this.Size = new Size(360, 215);
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
             this.MaximizeBox = false;
+            this.TopMost = true;
             this.BackColor = Color.FromArgb(19, 27, 46);
             this.ForeColor = Color.White;
-            this.Font = new Font("Segoe UI", 10F, FontStyle.Regular);
+            this.Font = new Font("Segoe UI", 9.5F, FontStyle.Regular);
+
+            // Position neatly in bottom-right corner above taskbar so it doesn't block the screen
+            Rectangle workArea = Screen.PrimaryScreen.WorkingArea;
+            this.StartPosition = FormStartPosition.Manual;
+            this.Location = new Point(workArea.Right - this.Width - 16, workArea.Bottom - this.Height - 16);
 
             Label titleLabel = new Label();
-            titleLabel.Text = "🛡️ RemoteAssist Mouse & Keyboard Helper (v2)";
-            titleLabel.Font = new Font("Segoe UI", 12F, FontStyle.Bold);
-            titleLabel.Location = new Point(20, 18);
-            titleLabel.Size = new Size(385, 28);
+            titleLabel.Text = "🛡️ Full Control Helper Active";
+            titleLabel.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
+            titleLabel.Location = new Point(16, 12);
+            titleLabel.Size = new Size(320, 24);
             this.Controls.Add(titleLabel);
 
             statusLabel = new Label();
-            statusLabel.Text = "🟢 Active — Partner can click, open files & type";
+            statusLabel.Text = "🟢 Ready — Partner can control mouse & open files";
             statusLabel.ForeColor = Color.FromArgb(52, 211, 153);
-            statusLabel.Location = new Point(20, 50);
-            statusLabel.Size = new Size(385, 24);
+            statusLabel.Location = new Point(16, 38);
+            statusLabel.Size = new Size(325, 22);
             this.Controls.Add(statusLabel);
 
             allowCheckBox = new CheckBox();
-            allowCheckBox.Text = "Allow my partner to control my mouse && keyboard";
+            allowCheckBox.Text = "Allow Partner Full Mouse && Keyboard Control";
             allowCheckBox.Checked = true;
-            allowCheckBox.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
-            allowCheckBox.Location = new Point(22, 85);
-            allowCheckBox.Size = new Size(380, 30);
+            allowCheckBox.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
+            allowCheckBox.Location = new Point(18, 66);
+            allowCheckBox.Size = new Size(320, 28);
             allowCheckBox.CheckedChanged += (s, e) => {
                 allowOsControl = allowCheckBox.Checked;
                 UpdateStatusText();
             };
             this.Controls.Add(allowCheckBox);
 
-            logLabel = new Label();
-            logLabel.Text = "Supports single-click, double-click to open files/folders, drag-and-drop, right-click, scroll, and keyboard typing.";
-            logLabel.ForeColor = Color.FromArgb(148, 163, 184);
-            logLabel.Font = new Font("Segoe UI", 9F, FontStyle.Regular);
-            logLabel.Location = new Point(20, 122);
-            logLabel.Size = new Size(380, 48);
-            this.Controls.Add(logLabel);
-
             stopButton = new Button();
             stopButton.Text = "🛑 STOP && CLOSE HELPER NOW";
-            stopButton.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
+            stopButton.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
             stopButton.BackColor = Color.FromArgb(239, 68, 68);
             stopButton.ForeColor = Color.White;
             stopButton.FlatStyle = FlatStyle.Flat;
             stopButton.FlatAppearance.BorderSize = 0;
-            stopButton.Location = new Point(20, 182);
-            stopButton.Size = new Size(375, 48);
+            stopButton.Location = new Point(16, 106);
+            stopButton.Size = new Size(312, 46);
             stopButton.Cursor = Cursors.Hand;
             stopButton.Click += (s, e) => {
                 this.Close();
@@ -130,12 +130,12 @@ namespace RemoteAssist
             }
             if (!allowOsControl)
             {
-                statusLabel.Text = "🔒 Paused — Mouse & Keyboard control is OFF";
+                statusLabel.Text = "🔒 Paused — Full control is switched OFF";
                 statusLabel.ForeColor = Color.FromArgb(251, 191, 36);
             }
             else
             {
-                statusLabel.Text = "🟢 Active — Partner can click, open files & type";
+                statusLabel.Text = "🟢 Active — Partner has Full Control";
                 statusLabel.ForeColor = Color.FromArgb(52, 211, 153);
             }
         }
@@ -172,7 +172,7 @@ namespace RemoteAssist
 
                 res.Headers.Add("Access-Control-Allow-Origin", "*");
                 res.Headers.Add("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-                res.Headers.Add("Access-Control-Allow-Headers", "Content-Type");
+                res.Headers.Add("Access-Control-Allow-Headers", "*");
                 res.Headers.Add("Access-Control-Allow-Private-Network", "true");
 
                 if (req.HttpMethod == "OPTIONS")
@@ -187,7 +187,7 @@ namespace RemoteAssist
                 if (req.Url.AbsolutePath == "/status")
                 {
                     string json = string.Format(
-                        "{{\"ok\":true,\"version\":2,\"allowControl\":{0},\"width\":{1},\"height\":{2}}}",
+                        "{{\"ok\":true,\"version\":3,\"allowControl\":{0},\"width\":{1},\"height\":{2}}}",
                         allowOsControl ? "true" : "false",
                         bounds.Width,
                         bounds.Height
@@ -195,15 +195,6 @@ namespace RemoteAssist
                     byte[] buf = Encoding.UTF8.GetBytes(json);
                     res.ContentType = "application/json";
                     res.ContentLength64 = buf.Length;
-                    res.OutputStream.Write(buf, 0, buf.Length);
-                    res.Close();
-                    return;
-                }
-
-                if (req.Url.AbsolutePath == "/permission" && req.HttpMethod == "POST")
-                {
-                    byte[] buf = Encoding.UTF8.GetBytes("{\"ok\":true}");
-                    res.ContentType = "application/json";
                     res.OutputStream.Write(buf, 0, buf.Length);
                     res.Close();
                     return;
@@ -226,7 +217,9 @@ namespace RemoteAssist
                     return;
                 }
 
-                res.StatusCode = 404;
+                res.StatusCode = 200;
+                byte[] okBuf = Encoding.UTF8.GetBytes("{\"ok\":true}");
+                res.OutputStream.Write(okBuf, 0, okBuf.Length);
                 res.Close();
             }
             catch
@@ -275,23 +268,22 @@ namespace RemoteAssist
                 if (btn == "right")
                 {
                     mouse_event(MOUSEEVENTF_RIGHTDOWN, x, y, 0, 0);
-                    Thread.Sleep(15);
+                    Thread.Sleep(20);
                     mouse_event(MOUSEEVENTF_RIGHTUP, x, y, 0, 0);
                 }
                 else
                 {
                     mouse_event(MOUSEEVENTF_LEFTDOWN, x, y, 0, 0);
-                    Thread.Sleep(15);
+                    Thread.Sleep(20);
                     mouse_event(MOUSEEVENTF_LEFTUP, x, y, 0, 0);
                 }
             }
             else if (type == "mouse-dblclick")
             {
-                // Lock cursor at exact target pixel and fire fast native double-click to open files/folders
                 SetCursorPos(x, y);
                 mouse_event(MOUSEEVENTF_LEFTDOWN, x, y, 0, 0);
                 mouse_event(MOUSEEVENTF_LEFTUP, x, y, 0, 0);
-                Thread.Sleep(45);
+                Thread.Sleep(40);
                 SetCursorPos(x, y);
                 mouse_event(MOUSEEVENTF_LEFTDOWN, x, y, 0, 0);
                 mouse_event(MOUSEEVENTF_LEFTUP, x, y, 0, 0);
@@ -301,6 +293,19 @@ namespace RemoteAssist
                 double deltaY = ExtractDouble(json, "deltaY");
                 int wheel = (int)Math.Max(-360, Math.Min(360, -deltaY));
                 mouse_event(MOUSEEVENTF_WHEEL, 0, 0, wheel, 0);
+            }
+            else if (type == "show-desktop")
+            {
+                // Win + D to show desktop icons/files immediately
+                keybd_event(VK_LWIN, 0, 0, 0);
+                keybd_event(VK_D, 0, 0, 0);
+                Thread.Sleep(20);
+                keybd_event(VK_D, 0, KEYEVENTF_KEYUP, 0);
+                keybd_event(VK_LWIN, 0, KEYEVENTF_KEYUP, 0);
+            }
+            else if (type == "open-explorer")
+            {
+                try { Process.Start("explorer.exe"); } catch { }
             }
             else if (type == "key-down")
             {
@@ -331,7 +336,7 @@ namespace RemoteAssist
         private void TapVirtualKey(byte vk)
         {
             keybd_event(vk, 0, 0, 0);
-            Thread.Sleep(10);
+            Thread.Sleep(12);
             keybd_event(vk, 0, KEYEVENTF_KEYUP, 0);
         }
 
@@ -339,7 +344,6 @@ namespace RemoteAssist
         {
             if (string.IsNullOrEmpty(key)) return;
 
-            // Use direct Win32 keybd_event for navigation & Enter so opening files/folders always works
             switch (key)
             {
                 case "Enter": TapVirtualKey(VK_RETURN); return;

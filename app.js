@@ -24,6 +24,7 @@
   let controllerState = {
     connected: false,
     allowControl: false,
+    helperRunning: false,
     hostName: 'Partner Laptop',
     lastX: 0.5,
     lastY: 0.5
@@ -91,6 +92,8 @@
   const remoteDesktopShell = document.getElementById('remoteDesktopShell');
   const remoteHostTitle = document.getElementById('remoteHostTitle');
   const controllerPermissionBadge = document.getElementById('controllerPermissionBadge');
+  const showDesktopBtn = document.getElementById('showDesktopBtn');
+  const openExplorerBtn = document.getElementById('openExplorerBtn');
   const singleClickDblToggle = document.getElementById('singleClickDblToggle');
   const sendEnterBtn = document.getElementById('sendEnterBtn');
   const sendRightClickBtn = document.getElementById('sendRightClickBtn');
@@ -419,7 +422,6 @@
       if (hostSession.allowControl && helperExeActive) {
         fetch('http://127.0.0.1:3847/input', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(ev)
         }).catch(() => {});
       }
@@ -448,6 +450,7 @@
         controllerState.connected = true;
         controllerState.hostName = msg.hostName || 'Partner Laptop';
         controllerState.allowControl = Boolean(msg.allowControl);
+        controllerState.helperRunning = Boolean(msg.helperRunning);
 
         switchMode('controller');
         controllerConnectCard.classList.add('hidden');
@@ -457,6 +460,9 @@
         remoteScreenWrapper.focus();
       } else if (msg.type === 'permissions-updated') {
         controllerState.allowControl = Boolean(msg.allowControl);
+        if (msg.helperRunning !== undefined) {
+          controllerState.helperRunning = Boolean(msg.helperRunning);
+        }
         updateControllerPermissionBadge();
       } else if (msg.type === 'chat') {
         appendChatMessage({ senderName: msg.senderName || 'Partner', text: msg.text, self: false });
@@ -509,12 +515,15 @@
   });
 
   function updateControllerPermissionBadge() {
-    if (controllerState.allowControl) {
-      controllerPermissionBadge.textContent = '🖱️ Mouse & Keyboard Control Active';
+    if (!controllerState.allowControl) {
+      controllerPermissionBadge.textContent = '👁️ View-Only (Partner Disabled Control)';
+      controllerPermissionBadge.className = 'badge badge-info';
+    } else if (!controllerState.helperRunning) {
+      controllerPermissionBadge.textContent = '⚠️ Screen View Only — Ask Partner to Open RemoteAssist-Helper.exe!';
       controllerPermissionBadge.className = 'badge badge-control';
     } else {
-      controllerPermissionBadge.textContent = '👁️ View-Only (Click to Laser Ping)';
-      controllerPermissionBadge.className = 'badge badge-info';
+      controllerPermissionBadge.textContent = '🟢 Full OS Mouse & File Control Active';
+      controllerPermissionBadge.className = 'badge badge-shield';
     }
   }
 
@@ -667,6 +676,18 @@
   });
 
   // Quick Action Buttons for Opening Files, Right-Clicking, and Typing
+  if (showDesktopBtn) {
+    showDesktopBtn.addEventListener('click', () => {
+      sendRemoteInput({ type: 'show-desktop' });
+    });
+  }
+
+  if (openExplorerBtn) {
+    openExplorerBtn.addEventListener('click', () => {
+      sendRemoteInput({ type: 'open-explorer' });
+    });
+  }
+
   if (sendEnterBtn) {
     sendEnterBtn.addEventListener('click', () => {
       sendRemoteInput({ type: 'key-down', key: 'Enter', code: 'Enter' });
