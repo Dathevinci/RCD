@@ -45,7 +45,7 @@
             <span class="badge badge-shield">Works on GitHub Pages</span>
           </div>
           <p class="muted-text">
-            Copy and send this link to your partner. They just click one green <strong>"Allow &amp; Share My Screen"</strong> button — no CMD, no codes to type!
+            Copy and send this link to your partner. Make sure they download the updated <strong>Mouse Helper v2</strong> on that page and choose <strong>"Entire Screen"</strong> when sharing!
           </p>
           <div class="inline-input">
             <input type="text" id="partnerInviteLinkInput" readonly value="Generating 1-click link..." />
@@ -140,14 +140,43 @@
           </div>
 
           <div class="toolbar-right">
+            <label class="toolbar-switch" title="When checked, a single click on your screen sends a Double-Click to easily open folders & files!">
+              <input type="checkbox" id="singleClickDblToggle" />
+              <span>⚡ 1-Click = Double-Click (Open Files)</span>
+            </label>
+            <button class="btn btn-secondary btn-sm" id="sendEnterBtn" title="Press Enter on partner's laptop to open the selected file/folder">
+              📂 Open Selected (Enter)
+            </button>
+            <button class="btn btn-secondary btn-sm" id="sendRightClickBtn" title="Right-click at current cursor position">
+              🖱️ Right-Click
+            </button>
             <label class="toolbar-switch" title="Forward keyboard keystrokes when screen is focused">
               <input type="checkbox" id="captureKeyboardToggle" checked />
-              <span>⌨️ Send Keystrokes</span>
+              <span>⌨️ Keyboard</span>
             </label>
             <button class="btn btn-secondary btn-sm" id="fullscreenBtn">⛶ Fullscreen</button>
             <button class="btn btn-danger btn-sm" id="controllerDisconnectBtn">Disconnect</button>
           </div>
         </div>
+
+        <!-- Quick Type Bar for easy typing & commands -->
+        <form id="quickTypeForm" class="inline-input" style="margin-bottom: 4px;">
+          <input
+            type="text"
+            id="quickTypeInput"
+            placeholder="⌨️ Type text here to send directly to partner's laptop (e.g. file name, search, URL)..."
+            autocomplete="off"
+          />
+          <button type="submit" class="btn btn-primary btn-sm" style="white-space: nowrap;">
+            Type Text
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm" id="sendBackspaceBtn" title="Send Backspace">
+            ⌫ Backspace
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm" id="sendEscBtn" title="Send Escape">
+            Esc
+          </button>
+        </form>
 
         <div class="remote-Screen-wrapper" id="remoteScreenWrapper" tabindex="0">
           <video id="remoteScreenVideo" autoplay playsinline></video>
@@ -216,10 +245,10 @@
               <strong id="agentStatusTitle">Windows Mouse Helper: Checking...</strong>
             </div>
             <p class="small-muted" id="agentStatusDesc">
-              To let your partner move your mouse &amp; type without opening CMD, download and open the tiny Windows Helper app below:
+              To let your partner open files, double-click &amp; type without CMD, download and open the Windows Helper v2 below:
             </p>
             <a href="RemoteAssist-Helper.exe" download="RemoteAssist-Helper.exe" class="btn btn-secondary btn-sm" id="downloadHelperBtn">
-              ⬇️ Download Windows Mouse Helper (14 KB — No CMD)
+              ⬇️ Download Windows Mouse Helper v2 (15 KB — No CMD)
             </a>
           </div>
 
@@ -254,7 +283,7 @@
             <div class="stage-placeholder" id="hostStagePlaceholder">
               <div class="placeholder-icon">🖥️</div>
               <h3>No Screen Shared Yet</h3>
-              <p>When a connection request arrives and you click <strong>Approve</strong>, your browser will ask which screen you want to share.</p>
+              <p>Important: When choosing what to share, pick the <strong>"Entire Screen"</strong> tab so your partner can see folders and files you open!</p>
             </div>
           </div>
 
@@ -303,8 +332,8 @@
           <strong id="requestedAccessLabel">Screen View + Mouse/Keyboard Control</strong>
         </div>
         <div class="detail-row">
-          <span>Your Safety Guarantee:</span>
-          <span>You can stop sharing at any second with 1 click.</span>
+          <span>Important Tip:</span>
+          <strong>Select "Entire Screen" in the next popup so they can see all windows!</strong>
         </div>
       </div>
 

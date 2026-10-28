@@ -11,7 +11,6 @@
     return s;
   }
 
-  // State
   let currentMode = 'controller';
   let hostSession = {
     sessionId: randomDigits(6),
@@ -25,7 +24,9 @@
   let controllerState = {
     connected: false,
     allowControl: false,
-    hostName: 'Partner Laptop'
+    hostName: 'Partner Laptop',
+    lastX: 0.5,
+    lastY: 0.5
   };
 
   let hostPeer = null;
@@ -90,9 +91,16 @@
   const remoteDesktopShell = document.getElementById('remoteDesktopShell');
   const remoteHostTitle = document.getElementById('remoteHostTitle');
   const controllerPermissionBadge = document.getElementById('controllerPermissionBadge');
+  const singleClickDblToggle = document.getElementById('singleClickDblToggle');
+  const sendEnterBtn = document.getElementById('sendEnterBtn');
+  const sendRightClickBtn = document.getElementById('sendRightClickBtn');
   const captureKeyboardToggle = document.getElementById('captureKeyboardToggle');
   const fullscreenBtn = document.getElementById('fullscreenBtn');
   const controllerDisconnectBtn = document.getElementById('controllerDisconnectBtn');
+  const quickTypeForm = document.getElementById('quickTypeForm');
+  const quickTypeInput = document.getElementById('quickTypeInput');
+  const sendBackspaceBtn = document.getElementById('sendBackspaceBtn');
+  const sendEscBtn = document.getElementById('sendEscBtn');
   const remoteScreenWrapper = document.getElementById('remoteScreenWrapper');
   const remoteScreenVideo = document.getElementById('remoteScreenVideo');
   const remoteLaserLayer = document.getElementById('remoteLaserLayer');
@@ -167,7 +175,7 @@
           helperExeActive = true;
           agentDot.className = 'dot online';
           agentStatusTitle.textContent = `Windows Mouse Helper: Active (${data.width}x${data.height})`;
-          agentStatusDesc.textContent = 'Ready! Your partner can assist with mouse & keyboard when allowed.';
+          agentStatusDesc.textContent = 'Ready! Your partner can click, open files, drag & type when allowed.';
           syncHelperPermission();
           addAuditLog('Connected to RemoteAssist-Helper.exe on 127.0.0.1:3847.');
         }
@@ -219,7 +227,6 @@
     const inviteUrl = `${getBaseFolderUrl()}partner.html?room=${controllerInviteCode}`;
     partnerInviteLinkInput.value = inviteUrl;
 
-    // 1. Controller Peer (Receives 1-click Partner invite connections)
     ctrlPeer = new Peer(PEER_PREFIX_CTRL + controllerInviteCode);
 
     ctrlPeer.on('open', () => {
@@ -240,7 +247,6 @@
       });
     });
 
-    // 2. Host Peer (Allows incoming manual 6-digit code requests)
     hostPeer = new Peer(PEER_PREFIX_HOST + hostSession.sessionId);
 
     hostPeer.on('connection', (conn) => {
@@ -298,14 +304,23 @@
     if (localDisplayStream && localDisplayStream.active) return localDisplayStream;
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: { cursor: 'always', frameRate: { ideal: 30, max: 60 } },
+        video: {
+          displaySurface: 'monitor',
+          cursor: 'always',
+          frameRate: { ideal: 30, max: 60 }
+        },
         audio: false
       });
       localDisplayStream = stream;
       hostPreviewVideo.srcObject = stream;
       hostStagePlaceholder.classList.add('hidden');
+
       const track = stream.getVideoTracks()[0];
       if (track) {
+        const settings = track.getSettings ? track.getSettings() : {};
+        if (settings.displaySurface && settings.displaySurface !== 'monitor') {
+          addAuditLog('⚠️ Note: You shared a single tab/window instead of "Entire Screen". Share "Entire Screen" if you want your partner to see files/folders outside the browser!');
+        }
         track.onended = () => endCurrentSession();
       }
       return stream;
@@ -357,7 +372,6 @@
     });
 
     activeMediaCall = hostPeer.call(conn.peer, stream);
-
     conn.on('close', () => endCurrentSession());
   }
 
@@ -398,7 +412,7 @@
         hostCursorTag.textContent = hostSession.partnerName;
         hostRemoteCursor.style.left = `${ev.x * 100}%`;
         hostRemoteCursor.style.top = `${ev.y * 100}%`;
-        if (ev.type === 'mouse-click' || ev.type === 'laser-ping') {
+        if (ev.type === 'mouse-down' || ev.type === 'mouse-click' || ev.type === 'mouse-dblclick' || ev.type === 'laser-ping') {
           spawnLaserRipple(hostVideoStage, ev.x, ev.y);
         }
       }
@@ -416,7 +430,7 @@
     }
   }
 
-  // ==================== CONTROLLER CONNECTION FLOW ====================
+  // ==================== CONTROLLER CONNECTION & INPUT ====================
   function setupControllerDataConnection(conn) {
     activeDataConn = conn;
 
@@ -557,11 +571,14 @@
   let lastMoveSent = 0;
   remoteScreenWrapper.addEventListener('mousemove', (e) => {
     const now = performance.now();
-    if (now - lastMoveSent < 24) return;
+    if (now - lastMoveSent < 22) return;
     lastMoveSent = now;
 
     const coords = getNormalizedVideoCoords(e.clientX, e.clientY);
     if (!coords) return;
+
+    controllerState.lastX = coords.x;
+    controllerState.lastY = coords.y;
 
     sendRemoteInput({
       type: 'pointer-move',
@@ -575,6 +592,9 @@
     const coords = getNormalizedVideoCoords(e.clientX, e.clientY);
     if (!coords) return;
 
+    controllerState.lastX = coords.x;
+    controllerState.lastY = coords.y;
+
     const button = e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left';
     spawnLaserRipple(remoteLaserLayer, coords.x, coords.y);
 
@@ -583,8 +603,36 @@
       return;
     }
 
+    // If "1-Click = Double-Click (Open Files)" mode is checked, send a crisp double-click on left click!
+    if (singleClickDblToggle && singleClickDblToggle.checked && button === 'left') {
+      sendRemoteInput({
+        type: 'mouse-dblclick',
+        x: coords.x,
+        y: coords.y
+      });
+      return;
+    }
+
     sendRemoteInput({
-      type: 'mouse-click',
+      type: 'mouse-down',
+      button,
+      x: coords.x,
+      y: coords.y
+    });
+  });
+
+  remoteScreenWrapper.addEventListener('mouseup', (e) => {
+    if (!controllerState.allowControl) return;
+    if (singleClickDblToggle && singleClickDblToggle.checked && e.button === 0) return;
+
+    const coords = getNormalizedVideoCoords(e.clientX, e.clientY) || {
+      x: controllerState.lastX,
+      y: controllerState.lastY
+    };
+    const button = e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left';
+
+    sendRemoteInput({
+      type: 'mouse-up',
       button,
       x: coords.x,
       y: coords.y
@@ -612,9 +660,51 @@
 
   remoteScreenWrapper.addEventListener('keydown', (e) => {
     if (!controllerState.connected || !controllerState.allowControl || !captureKeyboardToggle.checked) return;
+    // Don't hijack typing inside the Quick Type input or Chat input
+    if (document.activeElement === quickTypeInput || document.activeElement === chatInput) return;
     e.preventDefault();
     sendRemoteInput({ type: 'key-down', key: e.key, code: e.code });
   });
+
+  // Quick Action Buttons for Opening Files, Right-Clicking, and Typing
+  if (sendEnterBtn) {
+    sendEnterBtn.addEventListener('click', () => {
+      sendRemoteInput({ type: 'key-down', key: 'Enter', code: 'Enter' });
+    });
+  }
+
+  if (sendRightClickBtn) {
+    sendRightClickBtn.addEventListener('click', () => {
+      sendRemoteInput({
+        type: 'mouse-click',
+        button: 'right',
+        x: controllerState.lastX,
+        y: controllerState.lastY
+      });
+    });
+  }
+
+  if (quickTypeForm) {
+    quickTypeForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const text = quickTypeInput.value;
+      if (!text) return;
+      sendRemoteInput({ type: 'type-text', text });
+      quickTypeInput.value = '';
+    });
+  }
+
+  if (sendBackspaceBtn) {
+    sendBackspaceBtn.addEventListener('click', () => {
+      sendRemoteInput({ type: 'key-down', key: 'Backspace', code: 'Backspace' });
+    });
+  }
+
+  if (sendEscBtn) {
+    sendEscBtn.addEventListener('click', () => {
+      sendRemoteInput({ type: 'key-down', key: 'Escape', code: 'Escape' });
+    });
+  }
 
   fullscreenBtn.addEventListener('click', () => {
     if (!document.fullscreenElement) {

@@ -32,6 +32,7 @@
   const confirmDeclineBtn = document.getElementById('confirmDeclineBtn');
 
   const activePartnerStatus = document.getElementById('activePartnerStatus');
+  const notEntireScreenWarningBtn = document.getElementById('notEntireScreenWarningBtn');
   const simplePreviewVideo = document.getElementById('simplePreviewVideo');
   const simpleRemoteCursor = document.getElementById('simpleRemoteCursor');
   const simpleCursorTag = document.getElementById('simpleCursorTag');
@@ -53,7 +54,6 @@
   let localStream = null;
   let helperExeActive = false;
 
-  // Poll for local Windows Mouse Helper (RemoteAssist-Helper.exe on 127.0.0.1:3847)
   async function checkLocalHelperExe() {
     try {
       const res = await fetch('http://127.0.0.1:3847/status');
@@ -63,15 +63,15 @@
         partnerHelperDot.className = 'dot online';
         partnerHelperBadge.textContent = '🟢 Ready';
         partnerHelperBadge.className = 'badge badge-shield';
-        partnerHelperTitle.textContent = 'Mouse Control Helper: Running!';
-        partnerHelperDesc.textContent = 'Awesome! Your partner can move your mouse and help you when you click Allow below.';
+        partnerHelperTitle.textContent = 'Step 1: Mouse & File Helper Running!';
+        partnerHelperDesc.textContent = 'Awesome! Your partner can now click, open files/folders, and type when you click Step 2 below.';
         syncHelperPermission();
         return;
       }
     } catch {}
     helperExeActive = false;
     partnerHelperDot.className = 'dot';
-    partnerHelperBadge.textContent = 'Optional';
+    partnerHelperBadge.textContent = 'Required for Control';
     partnerHelperBadge.className = 'badge';
   }
 
@@ -134,19 +134,42 @@
     if (localStream && localStream.active) return localStream;
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: { cursor: 'always', frameRate: { ideal: 30, max: 60 } },
+        video: {
+          displaySurface: 'monitor',
+          cursor: 'always',
+          frameRate: { ideal: 30, max: 60 }
+        },
         audio: false
       });
       localStream = stream;
       simplePreviewVideo.srcObject = stream;
       const track = stream.getVideoTracks()[0];
       if (track) {
+        const settings = track.getSettings ? track.getSettings() : {};
+        if (settings.displaySurface && settings.displaySurface !== 'monitor') {
+          notEntireScreenWarningBtn.classList.remove('hidden');
+        } else {
+          notEntireScreenWarningBtn.classList.add('hidden');
+        }
         track.onended = () => stopSession();
       }
       return stream;
     } catch {
       return null;
     }
+  }
+
+  if (notEntireScreenWarningBtn) {
+    notEntireScreenWarningBtn.addEventListener('click', async () => {
+      if (localStream) {
+        localStream.getTracks().forEach((t) => t.stop());
+        localStream = null;
+      }
+      const stream = await captureScreen();
+      if (stream && activeDataConn && peer) {
+        activeMediaCall = peer.call(activeDataConn.peer, stream);
+      }
+    });
   }
 
   function handleIncomingData(msg) {
@@ -170,7 +193,6 @@
     }
   }
 
-  // 1-Click Start Button
   startSimpleShareBtn.addEventListener('click', async () => {
     sessionState.allowControl = simpleAllowControl.checked;
     activeControlSwitch.checked = sessionState.allowControl;
@@ -192,7 +214,7 @@
           allowControl: sessionState.allowControl
         });
         activeMediaCall = peer.call(targetPeerId, stream);
-        activePartnerStatus.textContent = 'Connected! Your partner can now see your screen.';
+        activePartnerStatus.textContent = 'Connected! Your partner can now see your screen and help you.';
         showStep(stepActive);
       });
 
